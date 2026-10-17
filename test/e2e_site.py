@@ -204,7 +204,8 @@ with sync_playwright() as p:
     st3.add_script_tag(content=spb_text)
     st3.wait_for_timeout(500)
     check(st3.evaluate("window.SPB && window.SPB.origin") == prod, f"reader started without a script URL falls back to the live site ({prod})")
-    if LIVE:
+    # Only against production: on a preview URL the reader falls back to production, which this test doesn't serve.
+    if LIVE and prod == BOARD:
         with ctx3.expect_page() as pop3:
             st3.locator("#spb-dock").locator("#openwin").click()
         bw3 = pop3.value
