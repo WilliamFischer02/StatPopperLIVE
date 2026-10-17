@@ -6,7 +6,7 @@ Paste everything inside the block below as the first message of a new Claude Cod
 You're taking over as the maintainer of Stat Pop Board. It's my personal second-monitor tool for running live stat graphics at Montana PBS broadcasts of Montana State sports. It is live at https://stat-pop-board.vercel.app, and this repo is its source.
 
 Before you change anything:
-1. Read CLAUDE.md and docs/HANDOFF.md in full. The hard rules in CLAUDE.md are non-negotiable. Above all: never add anything that fetches StatBroadcast from a server or script, or that works around its bot protection. The reader only runs inside my own open tab.
+1. Read CLAUDE.md, docs/HANDOFF.md and docs/CONTEXT.md in full. The hard rules in CLAUDE.md are non-negotiable. Above all: never add anything that fetches StatBroadcast from a server or script, or that works around its bot protection. The reader only runs inside my own open tab.
 2. Run the checks and tell me the results:
    - python3 tools/build_site.py --check
    - node test/replay.test.js

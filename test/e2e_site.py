@@ -7,6 +7,7 @@ environment) and served to the test browser under the real origin. StatBroadcast
 local mock page; the test never contacts StatBroadcast.
 """
 import os
+import re
 import ssl
 import sys
 import urllib.request
@@ -163,12 +164,58 @@ with sync_playwright() as p:
     href = st.get_attribute("#bm", "href")
     check(href.startswith("javascript:") and BOARD in href, "setup page builds the bookmark for this site")
     tm = st.input_value("#tmcode")
-    check("@match        https://stats.statbroadcast.com/broadcast/*" in tm and BOARD in tm, "setup page builds the Tampermonkey script")
+    check("@match        https://stats.statbroadcast.com/broadcast/*" in tm and "@require" in tm, "setup page shows the Tampermonkey script")
     st.screenshot(path=str(SHOTS / "e2e-setup.png"), full_page=True)
     rpg = ctx.new_page()
     rpg.goto(BOARD + "/replay")
     rpg.wait_for_timeout(500)
     check(rpg.evaluate("document.querySelectorAll('.pcard').length") >= 5, "replay page renders player cards")
+
+    # 7. One-click Tampermonkey script: served, versioned, reader pulled in by @require.
+    check(st.get_attribute("#tminstall", "href") == "/stat-pop-board.user.js", "setup page links the one-click Tampermonkey install")
+    us = st.evaluate("fetch('/stat-pop-board.user.js').then(r => r.text())")
+    board_version = st.evaluate("fetch('/spb.js').then(r => r.text()).then(t => t.match(/version: \"([^\"]+)\"/)[1])")
+    m = re.search(r"@require\s+(\S+)/spb\.js\?v=(\S+)", us)
+    check("@updateURL" in us and "@downloadURL" in us and f"@version      {board_version}" in us and m and m.group(2) == board_version,
+          "Tampermonkey script is versioned, auto-updating, and requires the matching reader")
+    check(st.input_value("#tmcode").strip() == us.strip(), "manual-install text matches the one-click script")
+    prod = m.group(1) if m else ""
+
+    # 8. Tampermonkey-style start: reader code runs with no script URL and no __spbOrigin (like @require).
+    spb_text = live_fetch(BOARD + "/spb.js")[2].decode() if LIVE else (SITE / "spb.js").read_text()
+    ctx3 = b.new_context(viewport={"width": 1440, "height": 900})
+    ctx3.route("**/*", route)
+    st3 = ctx3.new_page()
+    st3.on("pageerror", lambda e: errors.append(f"tm-style: {e}"))
+    st3.goto("https://stats.statbroadcast.com/broadcast/?id=670274")
+    st3.evaluate(f"showRally({start})")
+    st3.add_script_tag(content=spb_text)
+    st3.wait_for_timeout(500)
+    check(st3.evaluate("window.SPB && window.SPB.origin") == prod, f"reader started without a script URL falls back to the live site ({prod})")
+    if LIVE:
+        with ctx3.expect_page() as pop3:
+            st3.locator("#spb-dock").locator("#openwin").click()
+        bw3 = pop3.value
+        bw3.wait_for_load_state()
+        bw3.wait_for_timeout(1500)
+        check(board_state(bw3)["mode"] == "Live", "Tampermonkey-style reader links to the live board")
+
+    # 9. Board warns when the stats tab runs an older reader than the board.
+    old = spb_text.replace(f'version: "{board_version}"', 'version: "0.0.9"', 1)
+    st4 = ctx3.new_page()
+    st4.goto("https://stats.statbroadcast.com/broadcast/?id=670274")
+    st4.evaluate(f"showRally({start})")
+    st4.evaluate(f"window.__spbOrigin = {BOARD!r}")
+    st4.add_script_tag(content=old)
+    st4.wait_for_timeout(400)
+    with ctx3.expect_page() as pop4:
+        st4.locator("#spb-dock").locator("#openwin").click()
+    bw4 = pop4.value
+    bw4.wait_for_load_state()
+    bw4.wait_for_timeout(2500)
+    note = bw4.evaluate("document.getElementById('notice').hidden ? '' : document.getElementById('notice').textContent")
+    check("running reader 0.0.9" in note, f"board flags an outdated reader ({note[:70]})")
+    ctx3.close()
 
     board.close()
     check(not errors, "no page errors" + ("" if not errors else ": " + " | ".join(errors[:5])))

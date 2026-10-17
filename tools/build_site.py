@@ -8,6 +8,7 @@ Bump VERSION for every user-visible change: it cache-busts ?v= URLs and shows in
 """
 import argparse
 import filecmp
+import html
 import json
 import shutil
 import sys
@@ -20,7 +21,10 @@ args = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 args.add_argument("--check", action="store_true", help="build to a temp folder and compare with site/")
 args = args.parse_args()
 OUT = Path(tempfile.mkdtemp(prefix="spb-site-")) if args.check else SITE
-VERSION = "0.2.0"
+VERSION = "0.2.1"
+# Where the live site is served. The reader falls back to this when nothing else tells it where the board is
+# (Tampermonkey's @require gives it no script URL), and the one-click Tampermonkey script points here.
+PROD_ORIGIN = "https://stat-pop-board.vercel.app"
 FONTS = "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap"
 TRAILER = "})(typeof globalThis !== 'undefined' ? globalThis : this);"
 
@@ -44,7 +48,7 @@ bundle = f"""/* Stat Pop Board {VERSION}: reads only the page you have open and 
 if (window.SPB && window.SPB.version) {{ if (!window.__spbNoReader && window.SPB.show) window.SPB.show(); return; }}
 var cs = document.currentScript;
 var SPB = {{ version: {json.dumps(VERSION)} }};
-SPB.origin = window.__spbOrigin || (cs && cs.src ? new URL(cs.src, location.href).origin : null);
+SPB.origin = window.__spbOrigin || (cs && cs.src ? new URL(cs.src, location.href).origin : null) || {json.dumps(PROD_ORIGIN)};
 SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v={VERSION}' : null;
 SPB.fontsHref = {json.dumps(FONTS)};
 SPB.rosters = {{ msuVolleyball: {json.dumps(roster, separators=(",", ":"))} }};
@@ -66,6 +70,26 @@ replay_src_js = ("window.REPLAY_DATA=ReplayParse.build({\nmatch:" + json.dumps(s
 (OUT / "assets" / "replay.js").write_text(read("replay.js") + "\n" + read("replay-parse.js") + "\n" + replay_src_js, encoding="utf-8")
 for src, dst in [("app-live.js", "live.js"), ("app-replay.js", "replay-app.js"), ("app-practice.js", "practice.js"), ("app-setup.js", "setup.js")]:
     (OUT / "assets" / dst).write_text(read(src), encoding="utf-8")
+
+# Tampermonkey script. The reader comes in through @require, which Tampermonkey downloads itself, so a stats page
+# that blocks outside <script> tags can't stop it. @updateURL lets Tampermonkey pick up new versions on its own.
+USERSCRIPT = f"""// ==UserScript==
+// @name         Stat Pop Board reader
+// @namespace    goob-entertainment.stat-pop-board
+// @version      {VERSION}
+// @description  Starts the Stat Pop Board reader on StatBroadcast pages. It reads only the page you have open.
+// @match        https://stats.statbroadcast.com/broadcast/*
+// @match        https://*.statbroadcast.com/broadcast/*
+// @require      {PROD_ORIGIN}/spb.js?v={VERSION}
+// @updateURL    {PROD_ORIGIN}/stat-pop-board.user.js
+// @downloadURL  {PROD_ORIGIN}/stat-pop-board.user.js
+// @run-at       document-idle
+// @grant        none
+// @noframes
+// ==/UserScript==
+// The reader itself arrives through @require above and starts on its own. Nothing else to do here.
+"""
+(OUT / "stat-pop-board.user.js").write_text(USERSCRIPT, encoding="utf-8")
 
 (OUT / "favicon.svg").write_text(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#0f1317"/>'
@@ -143,6 +167,7 @@ BRAND = '<a class="brand" href="/" style="text-decoration:none;color:inherit"><b
   <div style="display:grid;gap:8px">
     <h1>Set up the reader</h1>
     <p class="lead">The board can&rsquo;t see the stats page by itself: browsers keep sites walled off from each other. A small reader runs in the stats tab and passes what it reads to the board window on the same computer. Pick one way to start it.</p>
+    <p class="small"><b>Which one?</b> Start with the bookmark: nothing to install. If clicking it shows &ldquo;blocked&rdquo;, the console paste always works. Tampermonkey is the hands-free option if the computer lets you add extensions.</p>
   </div>
 
   <section class="opt">
@@ -168,16 +193,30 @@ BRAND = '<a class="brand" href="/" style="text-decoration:none;color:inherit"><b
     <p class="small">You&rsquo;ll repeat this each time you open or reload the stats page.</p>
   </section>
 
-  <section class="opt">
-    <h2>3 &middot; Tampermonkey <small>Starts by itself every game, if the computer allows extensions.</small></h2>
+  <section class="opt" id="tampermonkey">
+    <h2>3 &middot; Tampermonkey <small>Starts by itself every time you open a stats page. Needs a browser extension.</small></h2>
     <ol>
-      <li>Add the Tampermonkey extension to Chrome or Edge.</li>
-      <li>If Tampermonkey says user scripts are off: open the extension&rsquo;s <b>Details</b> page and turn on <b>Allow User Scripts</b>.</li>
-      <li>Tampermonkey &rarr; <b>Create a new script</b> &rarr; select everything &rarr; paste this &rarr; <b>File &rarr; Save</b>.</li>
+      <li><b>Add Tampermonkey</b> from your browser&rsquo;s extension store: the Chrome Web Store in Chrome, or Edge Add-ons in Edge. If the store says the extension is <b>blocked by your organization</b>, stop here and use the bookmark instead.</li>
+      <li><b>Let it run scripts.</b> Browsers now keep this off until you turn it on:
+        <ul>
+          <li><b>Chrome 138 or newer:</b> click the puzzle-piece Extensions icon, then the &#8942; menu next to Tampermonkey &rarr; <b>Manage extension</b>. Turn on <b>Allow User Scripts</b>.</li>
+          <li><b>Older Chrome, or Edge:</b> type <code>chrome://extensions</code> (Edge: <code>edge://extensions</code>) in the address bar and turn on <b>Developer mode</b>.</li>
+        </ul>
+        Not sure which Chrome you have? Do the first one; if there&rsquo;s no Allow User Scripts switch, do the second.</li>
+      <li><b>Install the reader script:</b> <a class="bookmarklet" id="tminstall" href="/stat-pop-board.user.js">Install reader script</a> Tampermonkey opens its own install page. Click <b>Install</b>.</li>
+      <li><b>Check it:</b> open or reload any StatBroadcast stats page. The Pop board bar appears at the bottom-right by itself, and the Tampermonkey icon shows a <b>1</b>.</li>
     </ol>
-    <div class="row"><button class="tbtn" id="copytm" type="button">Copy Tampermonkey script</button><span id="tmnote" class="copied"></span></div>
-    <textarea id="tmcode" readonly rows="8" style="width:100%;font-family:var(--font-data);font-size:12px;background:var(--ground);color:var(--ink-2);border:1px solid var(--rule);border-radius:6px;padding:8px" aria-label="Tampermonkey script"></textarea>
-    <p class="small">The script only starts the reader. The reader itself loads from this site, so updates reach you without reinstalling.</p>
+    <p class="small"><b>Updates:</b> Tampermonkey checks this site for new versions on its own. To update right away, open the Tampermonkey menu &rarr; <b>Check for userscript updates</b>. The board tells you when the stats tab is running an older reader.</p>
+    <p class="small"><b>Nothing happens on the stats page?</b> Open the Tampermonkey menu on that page. If it says scripts are disabled, step 2 isn&rsquo;t done; if <i>Stat Pop Board reader</i> is listed but switched off, switch it on and reload.</p>
+    <details>
+      <summary class="small">Install by hand instead (if the install button doesn&rsquo;t open Tampermonkey)</summary>
+      <ol>
+        <li>Tampermonkey menu &rarr; <b>Create a new script</b>, select everything in the editor and delete it.</li>
+        <li>Paste the script below, then <b>File &rarr; Save</b>.</li>
+      </ol>
+      <div class="row"><button class="tbtn" id="copytm" type="button">Copy Tampermonkey script</button><span id="tmnote" class="copied"></span></div>
+      <textarea id="tmcode" readonly rows="10" style="width:100%;font-family:var(--font-data);font-size:12px;background:var(--ground);color:var(--ink-2);border:1px solid var(--rule);border-radius:6px;padding:8px" aria-label="Tampermonkey script">{html.escape(USERSCRIPT)}</textarea>
+    </details>
   </section>
 
   <section class="opt">
@@ -185,6 +224,7 @@ BRAND = '<a class="brand" href="/" style="text-decoration:none;color:inherit"><b
     <ol>
       <li>Open the <a href="/">board</a> and click <b>Try the practice page</b>. It opens a stand-in stats page that replays MSU vs Idaho; the reader starts there by itself.</li>
       <li>To test your bookmark: open the <a href="/practice?manual=1">practice page in manual mode</a>, click your <b>Pop board</b> bookmark, then click <b>Open board</b> in the bar that appears.</li>
+      <li>To test on the real StatBroadcast site before game time: paste the stats link of any <b>finished</b> match into the board, start the reader there, and open <b>Reader check</b>. If it says <b>Reading OK</b> and lists both teams&rsquo; players, you&rsquo;re set. If not, click <b>Copy for Claude</b> and send it.</li>
     </ol>
     <p class="small">The practice page&rsquo;s layout is a guess at StatBroadcast&rsquo;s, so it tests your setup, not the real page. On game day, <b>Reader check</b> on the board shows exactly what was read from the real page.</p>
   </section>

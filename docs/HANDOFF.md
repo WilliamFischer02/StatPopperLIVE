@@ -1,8 +1,9 @@
-# Handoff: status as of 2026-10-17
+# Handoff: status as of 2026-10-17 (v0.2.1)
 
 ## TL;DR
 
-- v0.2.0 is live at https://stat-pop-board.vercel.app. It is deployed and passes all 17 end-to-end checks against the production files.
+- The site is live at https://stat-pop-board.vercel.app. v0.2.0 went up at about 11:15 MT and v0.2.1 (Tampermonkey hardening) that afternoon. Both passed the full end-to-end suite.
+- Source of truth: the GitHub repo `WilliamFischer02/StatPopperLIVE`. The full decision log and research are in `docs/CONTEXT.md`.
 - **The main unknown:** the reader has never seen a real StatBroadcast page. Its parsing is based on StatCrew conventions and a mock page. The first real match is the calibration run.
 - The site was first deployed through the Vercel API, before this repo existed. Once the repo is connected to the Vercel project, Git pushes take over (see "Deployment notes").
 
@@ -12,7 +13,8 @@
 |---|---|
 | Oct 3 | Researched StatBroadcast: a viewer for StatCrew-format XML, with a 5–10 s public delay, bot detection, and terms limited to personal use through its web interface. William rejected an XML-feed approach in favor of reading the visible page. |
 | Oct 10 | Scope set: surface only notable stats (never "1 block"), with combo pops. Layout: game/console top-left, team pops top-right, 3 home cards bottom-left, 3 away bottom-right. Also: last-play keyword pinning, Pass and Hide, alerts (set/match point, timeout, challenge, penalty) and a rotation tracker. Built the engine, a replay of MSU 3–0 Idaho (Oct 1) and a v0.1 Tampermonkey in-tab overlay. |
-| Oct 17 | Moved to Vercel. Both pages run on one computer, and Tampermonkey may not be allowed on the work machine. Added the board page with paste-a-link (an event ID or URL opens the stats tab), the bookmarklet and console starters, `/setup`, `/practice`, impact-player stars (MSU roster preloaded, MSU stars kept across matches, opponents keyed by team code), a per-event engine reset, and Reader check with "Copy for Claude". Deployed v0.2.0. |
+| Oct 17 (morning) | Moved to Vercel. Both pages run on one computer, and Tampermonkey may not be allowed on the work machine. Added the board page with paste-a-link (an event ID or URL opens the stats tab), the bookmarklet and console starters, `/setup`, `/practice`, impact-player stars (MSU roster preloaded, MSU stars kept across matches, opponents keyed by team code), a per-event engine reset, and Reader check with "Copy for Claude". Deployed v0.2.0. |
+| Oct 17 (afternoon) | v0.2.1: one-click Tampermonkey install that pulls the reader through `@require` and updates itself; setup steps for Chrome 138+ (Allow User Scripts) and older Chrome/Edge (Developer mode); a pre-game test on a finished real match; the board warns about an outdated reader. Repo pushed to StatPopperLIVE. |
 
 ## Decisions (don't reopen without William)
 
@@ -20,7 +22,7 @@
 - **The reader runs in the user's tab and hands off to the board with `postMessage`.** Both windows must be on the same computer.
 - **The bookmarklet is the main way to start the reader** on the work computer. Console paste and Tampermonkey are fallbacks.
 - **Volleyball first.** Basketball and football come later.
-- **Dark board, typed-pop wording.** Pop names match William's graphics software buttons, and he types team stats ("4-0 Scoring Run", "Team Hit% .327", "28 Team Blocks") himself, using the board's team cards as suggestions.
+- **Dark board, typed-pop wording.** Pop names match William's graphics software buttons, and he types team stats ("4-0 Scoring Run", "Team Hit% 0.327", "28 Team Blocks") himself, using the board's team cards as suggestions.
 
 ## Unverified and at risk
 

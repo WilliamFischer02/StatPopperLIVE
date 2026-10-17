@@ -224,6 +224,8 @@
     const notes = [];
     if (view && last && !last.ok && age < 20000) notes.push('The stats page isn’t showing its box score right now. The board is holding the last numbers it saw. ' + (last.error || ''));
     if (last && openedEvent && last.eventId !== openedEvent && last.eventId !== 'page') notes.push(`The linked stats tab is on event ${last.eventId}, not the one you opened (${openedEvent}).`);
+    const readerVersion = last && last.diag && last.diag.version;
+    if (readerVersion && readerVersion !== SPB.version) notes.push(`The stats tab is running reader ${readerVersion}, but this board is ${SPB.version}. Reload the stats page and start the reader again. With Tampermonkey: open its menu, click Check for userscript updates, then reload the stats page.`);
     $('notice').hidden = !notes.length;
     $('notice').textContent = notes.join(' ');
     if (view) {
