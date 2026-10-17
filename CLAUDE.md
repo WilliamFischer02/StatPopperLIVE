@@ -24,13 +24,15 @@ A personal second-monitor tool for William, who runs the graphics computer for M
 ```bash
 python3 tools/build_site.py            # rebuild site/ and vercel.json
 python3 tools/build_site.py --check    # exit 1 if site/ is stale (CI runs this)
-node test/replay.test.js               # engine replay of the Oct 1 match, prints every surfaced card
-python3 test/e2e_site.py [shots_dir]   # Playwright end-to-end test against the local build (22 checks)
+node test/replay.test.js               # engine replay of the Oct 1 match: prints the cards and asserts the board rules (fill, Pin)
+python3 test/e2e_site.py [shots_dir]   # Playwright end-to-end test against the local build (25 checks)
 E2E_BASE=https://stat-pop-board.vercel.app python3 test/e2e_site.py   # same checks against the live site
 python3 tools/build_replay.py          # only if data/msu-idaho-2026-10-01.txt changes: rebuilds replay JSON and replay-src.json
 ```
 
 The e2e test needs Playwright for Python: `pip install playwright && python -m playwright install chromium`. StatBroadcast is always replaced by `test/mock-statbroadcast.html`, so the tests never contact it. Regenerate the mock with `python3 test/make_mock.py` if `src/replay.js` or the replay data changes.
+
+**On William's Windows machine** the commands are `python`, not `python3`, and Python 3.14 needs a current Playwright (`pip install --upgrade playwright`; the 1.47 pin in CI has no 3.14 wheel). Set `PYTHONIOENCODING=utf-8` for the e2e test's output. `.gitattributes` forces LF and the build writes LF, so `--check` passes on Windows too.
 
 ## Deploying
 
@@ -38,6 +40,7 @@ The e2e test needs Playwright for Python: `pip install playwright && python -m p
 
 - Vercel project: `stat-pop-board` (id `prj_x9jOMIj5VOQH8fsIUGvIDH3QfVtq`), team `williamfischer02's projects` (`team_MltQetJhTSO55JZan09NjIls`).
 - Once the repo is connected to the project in Vercel, a push to `main` deploys to production and a push to any other branch gets a preview URL. Vercel Authentication is off, so preview URLs are public.
+- **As of Oct 17 the project is still not linked to the repo** (`get_project` shows no `link`). Deploy a pushed commit through the Vercel API (MCP `create_deployment`) with `gitSource: {type: 'github', org: 'WilliamFischer02', repo: 'StatPopperLIVE', ref, sha}` and `project: 'stat-pop-board'`; add `target: 'production'` only for `main`.
 - After any deploy, run the live e2e test against the deployment URL.
 
 ## How it works
@@ -86,13 +89,14 @@ P = { uni, first, last, k, e, ta, a, sa, se, re, dig, bs, ba, be }
 
 **Engine (`src/engine.js`).**
 
-- **Notability.** Each stat is scored against a par that scales with effective sets played (`vbEffSets`). So 5 kills is notable in set 1 and ordinary by set 4, and "1 block" never shows.
-- **Pops.** Each pop is the button label William uses: Attacks, Kills, Blocks, Digs, Assists, Aces, Points, plus the combos Attacks & Blocks, Attacks & Digs, Digs & Blocks and Assists & Digs. A player card shows up to 3 pops.
+- **Notability.** Each stat is scored against a par that scales with effective sets played (`vbEffSets`). So 5 kills is notable in set 1 and ordinary by set 4. A sub-par stat like "1 block" can still appear, but only greyed, as filler (see Board makeup).
+- **Pops.** Each pop is the button label William uses: Attacks, Kills, Blocks, Digs, Assists, Aces, Points, plus the combos Attacks & Blocks, Attacks & Digs, Digs & Blocks and Assists & Digs. A player card shows up to 3 pops and at least 2 when the player has 2 different stats. Options below pop level (score < 0.8) are flagged `dim` and shown greyed.
 - **Impact score.** Impact = best pop + 0.35 × second pop + recent play involvement. Boosts: pinned (the last play named the player) +100, serving streak of 3 or more +1.2, starred +0.35, already on the board +0.3.
-- **Board makeup.** Each side shows 3 player cards and 2 team cards. Cards keep their slots between updates.
+- **Board makeup (v0.3.0).** Each side always fills 3 player cards (as long as 3 players have a stat) and 2 team cards (1 in the first few rallies). Order: Pin-held cards, then notable or live cards by impact, then the most active remaining players as greyed filler (`dim`). A card that just arrived gets a +1.5 stickiness bonus for 4 rallies, so cards don't flicker. Cards keep their slots between updates.
+- **Pin (William's button, v0.3.0).** Keeps a player's card on the board, still updating, for 10 minutes or until he clicks Unpin. Engine API: `toggleHold(key)`, `expireHolds()`; state is `user.held`, separate from `mem.pins` (the last-play pin). Max 3 per side; a 4th releases that side's oldest. Pass and Hide release the pin. The board checks for expiry every second.
 - **Impact stars.** A starred player always gets a card on their side.
 - **Pass and Hide.** Pass skips a player for 10 rallies. Hide removes them until they're unhidden.
-- **Team cards.** Scoring runs, set hit %, team hit %, kills, blocks, aces, digs, service errors, and a set summary.
+- **Team cards.** Notable: scoring runs, set hit %, team hit %, kills, blocks, aces, digs, service errors, and a set summary. Filler (greyed, always ranked below notable): team hit %, kills, blocks, digs, aces and set hit %, whenever the team has that stat.
 - **Alerts.** Set point, match point, timeout, challenge, penalty, sub, set won and final.
 - **Rotation.** A tracker built from the serve order.
 

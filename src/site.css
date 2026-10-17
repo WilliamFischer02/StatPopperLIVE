@@ -19,6 +19,11 @@ a:hover { color: var(--ink); }
 .abtn.star.on { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 55%, var(--rule)); }
 .pop.none { display: block; font-size: 13px; color: var(--ink-3); padding: 2px 0; }
 
+/* pinned cards (Pin button) */
+.held { color: var(--info); font-weight: 600; }
+.pcard.is-held:not(.is-live) { border-color: color-mix(in srgb, var(--info) 60%, var(--rule)); }
+.abtn.pin.on { color: var(--info); border-color: color-mix(in srgb, var(--info) 55%, var(--rule)); }
+
 /* picker */
 .picker { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; display: grid; gap: 12px; }
 .pk-head { display: flex; align-items: flex-start; gap: 16px; justify-content: space-between; }

@@ -1,6 +1,6 @@
 # Stat Pop Board: full project context
 
-**As of:** 2026-10-17, v0.2.1. **Written by:** the Claude session that built v0.1–v0.2.1, Oct 3–17.
+**As of:** 2026-10-17, v0.3.0. **Written by:** the Claude session that built v0.1–v0.2.1, Oct 3–17.
 
 This is the long-form record of what was asked for, what was decided, why, and what's still unknown. `CLAUDE.md` holds the working rules and how-to, and `docs/HANDOFF.md` holds the short status and backlog. Read those first; read this file when you need the reasoning behind a choice, or before reopening a decision.
 
@@ -53,6 +53,9 @@ This is the long-form record of what was asked for, what was decided, why, and w
 | 14 | Both pages on one computer; Tampermonkey may not be allowed; a script should keep the Vercel page live from a user-supplied stats link | Oct 17 | Done: bookmark / console / Tampermonkey starters; board opens the link itself |
 | 15 | A repo and handoff for a dedicated agent | Oct 17 | Done: this repo (WilliamFischer02/StatPopperLIVE) |
 | 16 | If Tampermonkey is required, the page must walk him through setup; research other ways to get the data | Oct 17 | Not required (§7). Walkthrough rewritten with one-click install (v0.2.1). Alternatives researched (§8) |
+| 17 | A Pin on each player card: keeps the card visible and live-updating for about 10 minutes or until unpinned, because cards popped in and out too fast | Oct 17 | Done in v0.3.0 (D14) |
+| 18 | Team pops should include team hit %, kills, blocks and the like, not only runs | Oct 17 | Done in v0.3.0: filler team cards (D14) |
+| 19 | Always 2–3 player cards and 2–3 options per card per side, and 1–2 team cards per side, even if minor; minor ones greyed until they reach a baseline | Oct 17 | Done in v0.3.0: 3 player cards, 2+ options, 2 team cards, greyed filler (D14) |
 
 ---
 
@@ -207,6 +210,12 @@ The paste-a-link flow gives the same experience, and the data never leaves Willi
 - The reader falls back to the production origin when nothing tells it where the board is, which is the Tampermonkey `@require` case.
 - The board warns when the stats tab runs an older reader than the board.
 
+**D14. v0.3.0: Pin, full board, greyed filler (Oct 17, about 3 pm).** William tried the practice page and asked for three things. How each was read and built:
+- **Pin.** A Pin/Unpin button on every player card. The card stays on its side, still updating, for 10 minutes or until Unpin, and shows "Pinned · until 7:42". Pin-held cards take slots first; max 3 per side (a 4th releases the oldest). Pass and Hide release a pin. Pins aren't saved across a stats-tab event change or a Swap sides.
+- **Always-full sides.** "2–3 stat option cards for 2–3 players per side" was read as both 3 player cards per side and at least 2 options per card (the Oct 10 ask was 2–3 options per player). Cards fill only from players with a recorded stat, so a side can be short in the first rallies. Team cards: 2 per side from filler lines (hit %, kills, blocks, digs, aces, set hit %), 1 in the first rallies.
+- **Greyed until notable.** Filler cards and options use the existing notability bars as the baseline: an option is greyed below pop score 0.8; a card is greyed unless it qualifies on its own (best pop ≥ 0.85, last play, or a serving streak) or is pinned. Starred players' cards can be greyed too.
+- **Less flicker.** New cards get a +1.5 stickiness bonus for 4 rallies, and a card that stops being notable stays as greyed filler instead of vanishing. Idaho replay: cards gone within 2 rallies of arriving went from 56 to 24.
+
 ---
 
 ## 6. Architecture quick reference
@@ -319,6 +328,7 @@ Play capture can only be tested during a live match.
 | Oct 17, about 11:40 | Repo zip: unzip, then `--check`, Node replay, e2e | All passed |
 | Oct 17, about 14:40 | v0.2.1 e2e (22 checks), local | All passed |
 | Oct 17, about 14:55 | v0.2.1 deployed from GitHub (commit `d177ba7`, deployment `dpl_EQ1uGfryhPzMp8xjY3FVPtCkU4ix`): all 13 live files byte-identical to the repo build; live e2e, 23 checks including a Tampermonkey-style start linking to the live board | All passed |
+| Oct 17, about 3:20 | v0.3.0 local: replay test with board-rule assertions; e2e 25 checks on Windows | All passed |
 | Never | Reader on a real StatBroadcast page | **Not yet.** Do the pre-game test in §7 |
 
 ---

@@ -334,6 +334,7 @@ function startReader(SPB) {
     $('swap').addEventListener('click', () => { swapped = !swapped; store.set('swap', swapped); resetEngine(); tick(true); });
     board = BV.mountBoard($('board'), {
       pass: (k) => { eng.pass(k); board.render(eng.view()); },
+      hold: (k) => { eng.toggleHold(k); board.render(eng.view()); },
       hide: (k) => { eng.hide(k); saveHidden(); board.render(eng.view()); },
       unhide: (k) => { eng.unhide(k); saveHidden(); board.render(eng.view()); },
     });
@@ -440,6 +441,9 @@ function startReader(SPB) {
       if (force || hash !== lastHash || fresh.length) {
         lastHash = hash; lastChange = Date.now();
         inTabView = eng.update(PE.swapSides(snap, swapped), fresh.map((l) => l.text).slice(-3));
+        if (overlayOpen()) board.render(inTabView);
+      } else if (eng.expireHolds()) {
+        inTabView = eng.view();
         if (overlayOpen()) board.render(inTabView);
       }
       if (overlayOpen()) {

@@ -17,7 +17,7 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parent.parent
 SITE = ROOT / "site"
 SHOTS = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "test"
-MOCK = (ROOT / "test" / "mock-statbroadcast.html").read_text()
+MOCK = (ROOT / "test" / "mock-statbroadcast.html").read_text(encoding="utf-8")
 BOARD = os.environ.get("E2E_BASE", "https://board.test").rstrip("/")
 LIVE = BOARD != "https://board.test"
 TYPES = {".html": "text/html", ".js": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json"}
@@ -113,6 +113,10 @@ with sync_playwright() as p:
     check("*Greeny" in s2["home"], "starred MSU player always gets a card")
     check("*Armstrong" in s2["away"], "starred opponent always gets a card")
     board.click("button[data-act=pk-close]")
+    # Pin an opponent card: it stays on the board while the set goes on.
+    pin_key = board.evaluate("document.querySelector('.q-away .pcard:not(.is-star)').dataset.key")
+    board.click(f".q-away .pcard[data-key='{pin_key}'] button[data-act=hold]")
+    board.wait_for_timeout(200)
     for n in range(start + 1, start + 6):
         stats.evaluate(f"showRally({n})")
         stats.wait_for_timeout(350)
@@ -121,6 +125,14 @@ with sync_playwright() as p:
     print("  ", s3)
     check(any(x.startswith("*") for x in s3["home"]), "star rule holds as the set goes on")
     check(any("Run" in t for t in s3["team"]), "team scoring-run card shows during MSU's run")
+    pinned = board.evaluate(f"(() => {{ const c = document.querySelector(\".q-away .pcard[data-key='{pin_key}']\"); return c ? [c.classList.contains('is-held'), c.querySelector('.held') ? c.querySelector('.held').textContent : ''] : null; }})()")
+    check(bool(pinned and pinned[0] and pinned[1].startswith("Pinned")), f"pinned card stays on the board ({pin_key}: {pinned})")
+    counts = board.evaluate("['home', 'away'].map(s => [document.querySelectorAll('.q-' + s + ' .pcard').length, document.querySelectorAll('.tcol.side-' + s + ' .tcard').length])")
+    check(counts == [[3, 2], [3, 2]], f"each side shows 3 player cards and 2 team cards ({counts})")
+    print("   greyed cards:", board.evaluate("document.querySelectorAll('.pcard.is-dim, .tcard.is-dim').length"))
+    board.click(f".q-away .pcard[data-key='{pin_key}'] button[data-act=hold]")
+    board.wait_for_timeout(200)
+    check(board.evaluate("document.querySelectorAll('.pcard.is-held').length") == 0, "Unpin releases the card")
     board.screenshot(path=str(SHOTS / "e2e-board.png"))
 
     # 3. Stats tab reload: the reader restarts and the board relinks by itself.
@@ -182,7 +194,7 @@ with sync_playwright() as p:
     prod = m.group(1) if m else ""
 
     # 8. Tampermonkey-style start: reader code runs with no script URL and no __spbOrigin (like @require).
-    spb_text = live_fetch(BOARD + "/spb.js")[2].decode() if LIVE else (SITE / "spb.js").read_text()
+    spb_text = live_fetch(BOARD + "/spb.js")[2].decode() if LIVE else (SITE / "spb.js").read_text(encoding="utf-8")
     ctx3 = b.new_context(viewport={"width": 1440, "height": 900})
     ctx3.route("**/*", route)
     st3 = ctx3.new_page()
@@ -192,7 +204,8 @@ with sync_playwright() as p:
     st3.add_script_tag(content=spb_text)
     st3.wait_for_timeout(500)
     check(st3.evaluate("window.SPB && window.SPB.origin") == prod, f"reader started without a script URL falls back to the live site ({prod})")
-    if LIVE:
+    # Only against production: on a preview URL the reader falls back to production, which this test doesn't serve.
+    if LIVE and prod == BOARD:
         with ctx3.expect_page() as pop3:
             st3.locator("#spb-dock").locator("#openwin").click()
         bw3 = pop3.value

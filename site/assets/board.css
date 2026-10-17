@@ -140,6 +140,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .pv .l { font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: .06em; color: var(--ink-3); margin-left: 4px; }
 .pop.best .pname { color: var(--ink); }
 .pop.best .pv .v { font-size: 21px; }
+/* Greyed: filler cards and options shown to keep each side full, below pop level for now. */
+.pcard.is-dim, .tcard.is-dim { opacity: .5; }
+.pcard.is-dim:hover, .pcard.is-dim:focus-within { opacity: .85; }
+.pop.dim .pname, .pop.dim .pv .v { color: var(--ink-3); }
 
 /* ---------- footer */
 .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: 13px; color: var(--ink-3); }
@@ -179,6 +183,11 @@ a:hover { color: var(--ink); }
 .abtn.star { color: var(--ink-3); padding: 3px 8px; }
 .abtn.star.on { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 55%, var(--rule)); }
 .pop.none { display: block; font-size: 13px; color: var(--ink-3); padding: 2px 0; }
+
+/* pinned cards (Pin button) */
+.held { color: var(--info); font-weight: 600; }
+.pcard.is-held:not(.is-live) { border-color: color-mix(in srgb, var(--info) 60%, var(--rule)); }
+.abtn.pin.on { color: var(--info); border-color: color-mix(in srgb, var(--info) 55%, var(--rule)); }
 
 /* picker */
 .picker { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; display: grid; gap: 12px; }
