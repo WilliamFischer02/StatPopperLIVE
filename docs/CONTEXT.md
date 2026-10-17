@@ -298,7 +298,10 @@ Play capture can only be tested during a live match.
   - Inline uploads had to be small, so `spb.js` went up in three parts, joined by a one-off build command (`dist/`). The project's saved build settings still reflect that, and the repo's `vercel.json` overrides them.
   - **Upload quirk:** a literal `̀` in source was decoded on upload. That's why `normName` in `engine.js` uses literal combining characters. It's harmless now that deploys come from Git.
   - Every file was verified byte for byte against the build. The live e2e test passed.
-- **Repo.** `WilliamFischer02/StatPopperLIVE`, populated Oct 17 with this tree; it's the source of truth from now on. Connect it to the Vercel project (Vercel project settings → Git) so a push to `main` deploys. Until then, deploys go through the API or the Vercel CLI.
+- **Repo.** `WilliamFischer02/StatPopperLIVE`, populated Oct 17 with this tree; it's the source of truth from now on.
+- **v0.2.1 (Oct 17, about 14:55).**
+  - Deployed from the repo's `main` through the Vercel API (`gitSource`), so Vercel built it from the repo using `vercel.json`.
+  - **The project is still not linked to the repo.** Pushes don't deploy until William connects it in the Vercel project's Git settings. Until then, deploy with the Vercel CLI (`npx vercel --prod`, after `vercel login`), or ask him.
 - **Earlier artifacts.** These are private to William, kept for reference only.
   - [Design doc](https://claude.ai/code/artifact/27fedf26-d98e-4345-8a80-c25222160397).
   - [Single-file replay](https://claude.ai/artifact/Ve3pV6h1UXWztMPYPfbiqi).
@@ -315,7 +318,7 @@ Play capture can only be tested during a live match.
 | Oct 17, about 11:25 | e2e (17 checks) against the production files | All passed |
 | Oct 17, about 11:40 | Repo zip: unzip, then `--check`, Node replay, e2e | All passed |
 | Oct 17, about 14:40 | v0.2.1 e2e (22 checks), local | All passed |
-| Oct 17 | v0.2.1 production deploy and live e2e | See the commit and deploy notes for v0.2.1 |
+| Oct 17, about 14:55 | v0.2.1 deployed from GitHub (commit `d177ba7`, deployment `dpl_EQ1uGfryhPzMp8xjY3FVPtCkU4ix`): all 13 live files byte-identical to the repo build; live e2e, 23 checks including a Tampermonkey-style start linking to the live board | All passed |
 | Never | Reader on a real StatBroadcast page | **Not yet.** Do the pre-game test in §7 |
 
 ---

@@ -42,7 +42,8 @@
 
 ## Deployment notes
 
-- **Current production deployment:** `dpl_9BW4MhJKhPsBUpoun5h4E657Bqcj`, aliased to `stat-pop-board.vercel.app`.
+- **Current production deployment:** `dpl_EQ1uGfryhPzMp8xjY3FVPtCkU4ix` (v0.2.1, built from this repo's `main` at `d177ba7`), aliased to `stat-pop-board.vercel.app`.
+- **Push-to-deploy is not on yet.** The Vercel project isn't linked to this repo; William needs to connect it in the project's Git settings. Check with him before assuming a push went live, and verify with the live e2e test.
 - **How it was deployed.** This first deploy went through the Vercel API with `spb.js` uploaded in three parts (`parts/spb-1..3.js`), which a one-off build command joined together. As a result, the project's saved settings still contain that build command and a `dist` output directory. The repo's `vercel.json` overrides both: no install, no build, output `site`. You can clear the overrides in the Vercel project settings once Git is connected, but they're harmless.
 - **After connecting the repo.** Check that the first Git deployment serves byte-identical files by running `E2E_BASE=<deployment URL> python3 test/e2e_site.py`. The repo's `site/` was verified identical to production on Oct 17.
 
