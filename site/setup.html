@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Pop Board Setup</title>
+<meta name="description" content="How to start the Stat Pop Board reader on a StatBroadcast page.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<link rel="stylesheet" href="/assets/board.css?v=0.2.0">
+</head>
+<body>
+<main class="page">
+  <header class="bar"><a class="brand" href="/" style="text-decoration:none;color:inherit"><b>Stat Pop Board</b></a><nav class="navlinks" style="margin-left:auto"><a href="/">Board</a><a href="/practice">Practice page</a><a href="/replay">Replay</a></nav></header>
+  <div style="display:grid;gap:8px">
+    <h1>Set up the reader</h1>
+    <p class="lead">The board can&rsquo;t see the stats page by itself: browsers keep sites walled off from each other. A small reader runs in the stats tab and passes what it reads to the board window on the same computer. Pick one way to start it.</p>
+  </div>
+
+  <section class="opt">
+    <h2>1 &middot; Bookmark button <small>No install. Best for a work computer.</small></h2>
+    <ol>
+      <li>Show the bookmarks bar: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>.</li>
+      <li>Drag this button onto the bar: <a class="bookmarklet" id="bm" href="#">Pop board</a></li>
+      <li>On the stats page, after <b>Accept &amp; Continue</b>, click the bookmark once. A Pop board bar appears at the bottom-right.</li>
+    </ol>
+    <div class="row"><button class="tbtn" id="copybm" type="button">Copy bookmark code</button><span id="bmnote" class="copied"></span></div>
+    <p class="small">Can&rsquo;t drag? Right-click the bookmarks bar &rarr; <b>Add page</b>, name it Pop board, and paste the copied code as the URL.</p>
+    <textarea id="bmcode" readonly rows="2" style="width:100%;font-family:var(--font-data);font-size:12px;background:var(--ground);color:var(--ink-2);border:1px solid var(--rule);border-radius:6px;padding:8px" aria-label="Bookmark code"></textarea>
+  </section>
+
+  <section class="opt">
+    <h2>2 &middot; Paste into the console <small>If bookmarks are locked, or the bookmark shows &ldquo;blocked&rdquo;.</small></h2>
+    <ol>
+      <li>Click <b>Copy reader code</b>: <button class="tbtn" id="copyreader" type="button">Copy reader code</button> <span id="readernote" class="copied"></span></li>
+      <li>On the stats page press <kbd>F12</kbd> (or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd>) and open <b>Console</b>.</li>
+      <li>If Chrome warns about pasting, type <code>allow pasting</code> and press <kbd>Enter</kbd> first.</li>
+      <li>Paste with <kbd>Ctrl</kbd>+<kbd>V</kbd>, press <kbd>Enter</kbd>, then close the console.</li>
+    </ol>
+    <p class="small">You&rsquo;ll repeat this each time you open or reload the stats page.</p>
+  </section>
+
+  <section class="opt">
+    <h2>3 &middot; Tampermonkey <small>Starts by itself every game, if the computer allows extensions.</small></h2>
+    <ol>
+      <li>Add the Tampermonkey extension to Chrome or Edge.</li>
+      <li>If Tampermonkey says user scripts are off: open the extension&rsquo;s <b>Details</b> page and turn on <b>Allow User Scripts</b>.</li>
+      <li>Tampermonkey &rarr; <b>Create a new script</b> &rarr; select everything &rarr; paste this &rarr; <b>File &rarr; Save</b>.</li>
+    </ol>
+    <div class="row"><button class="tbtn" id="copytm" type="button">Copy Tampermonkey script</button><span id="tmnote" class="copied"></span></div>
+    <textarea id="tmcode" readonly rows="8" style="width:100%;font-family:var(--font-data);font-size:12px;background:var(--ground);color:var(--ink-2);border:1px solid var(--rule);border-radius:6px;padding:8px" aria-label="Tampermonkey script"></textarea>
+    <p class="small">The script only starts the reader. The reader itself loads from this site, so updates reach you without reinstalling.</p>
+  </section>
+
+  <section class="opt">
+    <h2>Test it before a match</h2>
+    <ol>
+      <li>Open the <a href="/">board</a> and click <b>Try the practice page</b>. It opens a stand-in stats page that replays MSU vs Idaho; the reader starts there by itself.</li>
+      <li>To test your bookmark: open the <a href="/practice?manual=1">practice page in manual mode</a>, click your <b>Pop board</b> bookmark, then click <b>Open board</b> in the bar that appears.</li>
+    </ol>
+    <p class="small">The practice page&rsquo;s layout is a guess at StatBroadcast&rsquo;s, so it tests your setup, not the real page. On game day, <b>Reader check</b> on the board shows exactly what was read from the real page.</p>
+  </section>
+
+  <p class="small">What it reads: the score in the stats tab&rsquo;s title, the box-score tables, and new play-by-play lines. It sends them only to the board window on this computer. Nothing goes to a server; your impact-player picks and hidden players are saved in this browser.</p>
+</main>
+<script src="/assets/setup.js?v=0.2.0"></script>
+</body>
+</html>

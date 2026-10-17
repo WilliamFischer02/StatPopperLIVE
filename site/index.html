@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Stat Pop Board</title>
+<meta name="description" content="Second-monitor board that pulls pop-worthy stats from the StatBroadcast page you have open.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<link rel="stylesheet" href="/assets/board.css?v=0.2.0">
+<script>window.__spbNoReader = true;</script>
+<script src="/spb.js?v=0.2.0"></script>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="brand"><b>Stat Pop Board</b><span class="mode wait" id="mode">Waiting</span></div>
+    <span class="matchline" id="conn">Not linked to a stats page yet</span>
+    <div class="transport">
+      <button class="tbtn gold" id="starsbtn" type="button" aria-pressed="false">&#9733; Impact players</button>
+      <button class="tbtn" id="swap" type="button" title="Swap which team sits on the left">Swap sides</button>
+      <button class="tbtn" id="checkbtn" type="button" aria-pressed="false">Reader check</button>
+      <button class="tbtn" id="newlink" type="button" hidden>New link</button>
+      <button class="tbtn" id="fs" type="button">Full screen</button>
+      <nav class="navlinks"><a href="/setup">Setup</a></nav>
+    </div>
+  </header>
+  <div id="notice" class="notice" role="status" hidden></div>
+  <section id="picker" aria-label="Impact players" hidden></section>
+  <section id="check" class="check" aria-label="Reader check" hidden></section>
+  <section id="start" class="start" aria-label="Link a stats page">
+    <h1>Link a stats page</h1>
+    <p class="lead">Paste the game&rsquo;s StatBroadcast link, or just its event number. This board opens the stats page in a new tab and fills in once that page shows the box score.</p>
+    <form id="feedform" class="feed" autocomplete="off">
+      <label for="feed">StatBroadcast link or event ID</label>
+      <div class="feedrow"><input id="feed" type="text" inputmode="url" spellcheck="false" placeholder="https://stats.statbroadcast.com/broadcast/?id=670274"><button class="tbtn primary" type="submit">Open stats page</button></div>
+      <p class="hint" id="feedhint">Find it on <a href="https://msubobcats.com/calendar" target="_blank" rel="noopener">msubobcats.com &rarr; Schedule</a>: the game&rsquo;s &ldquo;Stats&rdquo; link.</p>
+    </form>
+    <ol class="steps">
+      <li><b>Accept &amp; Continue</b> on the stats page.</li>
+      <li><b>Start the reader</b> there: click your <i>Pop board</i> bookmark (it starts by itself if you use Tampermonkey). A small Pop board bar appears at the bottom-right.</li>
+      <li><b>Put the windows side by side</b>: stats page on one monitor, this board on the other.</li>
+    </ol>
+    <div class="recentlinks" id="recentlinks"></div>
+    <p class="morelinks"><a href="/setup">Set up the reader</a><button class="linkbtn" id="practice" type="button">Try the practice page</button><a href="/replay">Replay demo</a></p>
+  </section>
+  <div id="board" hidden></div>
+</div>
+<script src="/assets/live.js?v=0.2.0"></script>
+</body>
+</html>

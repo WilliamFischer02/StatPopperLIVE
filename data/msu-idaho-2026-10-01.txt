@@ -1,0 +1,165 @@
+# MSU vs Idaho, women's volleyball, Oct 1 2026, Shroyer Gym. MSU home, won 3-0 (25-20, 25-22, 25-20).
+# Transcribed from https://msubobcats.com/boxscore.aspx?id=7757 play-by-play.
+# Rally lines: SERVING_TEAM|play text|IDAHO-MSU score after the rally
+# SUB lines are console-only events.
+#SET 1
+UI|[Greer, Kiana] Kill by Spelts, Joelie (from Jaynes, Teagan).|0-1
+MSU|[Spelts, Joelie] Kill by Armstrong, Alaina (from Krakoczki, Csenge).|1-1
+UI|[Makaula, Koen] Attack error by Heidemann, Karli (from Jaynes, Teagan).|2-1
+UI|[Makaula, Koen] Kill by Heidemann, Karli (from Jaynes, Teagan), block error by Prisby, Anika.|2-2
+MSU|[Jaynes, Teagan] Attack error by Ryan, Lucy (from Krakoczki, Csenge).|2-3
+MSU|[Jaynes, Teagan] Service ace (Greer, Kiana).|2-4
+MSU|[Jaynes, Teagan] Kill by Ryan, Lucy (from Kleidon, Keira).|3-4
+UI|[Ryan, Lucy] Service error.|3-5
+SUB|MSU subs: Tufto, Elli.
+MSU|[Heidemann, Karli] Bad set by Noble, Nicolette.|4-5
+UI|[Armstrong, Alaina] Service error.|4-6
+MSU|[Noble, Nicolette] Attack error by Greer, Kiana (from Krakoczki, Csenge).|4-7
+MSU|[Noble, Nicolette] Kill by Spelts, Joelie.|4-8
+SUB|UI subs: Sullivan, Sarah.
+MSU|[Noble, Nicolette] Attack error by Tufto, Elli (from Jaynes, Teagan).|5-8
+UI|[Kleidon, Keira] Kill by Spelts, Joelie (from Jaynes, Teagan).|5-9
+MSU|[Greeny, Lauren] Kill by Greer, Kiana (from Krakoczki, Csenge).|6-9
+UI|[Krakoczki, Csenge] Kill by Ryan, Lucy (from Kleidon, Keira).|7-9
+UI|[Krakoczki, Csenge] Kill by Greer, Kiana (from Kleidon, Keira).|8-9
+UI|[Krakoczki, Csenge] Attack error by Tufto, Elli (from Noble, Nicolette).|9-9
+UI|[Krakoczki, Csenge] Service error.|9-10
+MSU|[Thomsen, Afton] Kill by Greer, Kiana (from Krakoczki, Csenge).|10-10
+UI|[Greer, Kiana] Kill by Armstrong, Alaina (from Krakoczki, Csenge).|11-10
+UI|[Greer, Kiana] Service error.|11-11
+MSU|[Spelts, Joelie] Attack error by Greeny, Lauren (from Jaynes, Teagan).|12-11
+UI|[Makaula, Koen] Kill by Heidemann, Karli (from Jaynes, Teagan).|12-12
+MSU|[Jaynes, Teagan] Kill by Armstrong, Alaina (from Krakoczki, Csenge).|13-12
+UI|[Ryan, Lucy] Service error.|13-13
+MSU|[Heidemann, Karli] Kill by Greeny, Lauren (from Jaynes, Teagan).|13-14
+MSU|[Heidemann, Karli] Attack error by Armstrong, Alaina (from Kleidon, Keira).|13-15
+MSU|[Heidemann, Karli] Attack error by Armstrong, Alaina (from Krakoczki, Csenge).|13-16
+MSU|[Heidemann, Karli] Kill by Prisby, Anika (from Krakoczki, Csenge).|14-16
+SUB|UI subs: Wakatake, Kailee.
+UI|[Wakatake, Kailee] Attack error by Tufto, Elli (from Jaynes, Teagan).|15-16
+UI|[Wakatake, Kailee] Kill by Greer, Kiana (from Krakoczki, Csenge).|16-16
+UI|[Wakatake, Kailee] Kill by Tufto, Elli (from Jaynes, Teagan).|16-17
+MSU|[Noble, Nicolette] Kill by Greer, Kiana (from Krakoczki, Csenge).|17-17
+UI|[Kleidon, Keira] Kill by Spelts, Joelie (from Jaynes, Teagan).|17-18
+MSU|[Greeny, Lauren] Kill by Spelts, Joelie (from Jaynes, Teagan).|17-19
+MSU|[Greeny, Lauren] Attack error by Krakoczki, Csenge (block by Tufto, Elli).|17-20
+MSU|[Greeny, Lauren] Service error.|18-20
+UI|[Krakoczki, Csenge] Kill by Spelts, Joelie (from Jaynes, Teagan).|18-21
+MSU|[Thomsen, Afton] Attack error by Greer, Kiana (from Makaula, Koen).|18-22
+MSU|[Thomsen, Afton] Kill by Greer, Kiana (from Krakoczki, Csenge).|19-22
+UI|[Greer, Kiana] Service error.|19-23
+SUB|MSU subs: Culler, Keely.
+MSU|[Culler, Keely] Service error.|20-23
+UI|[Makaula, Koen] Kill by Jaynes, Teagan (from Noble, Nicolette).|20-24
+MSU|[Jaynes, Teagan] Kill by Heidemann, Karli (from Jaynes, Teagan).|20-25
+#SET 2
+MSU|[Thomsen, Afton] Kill by Spelts, Joelie (from Jaynes, Teagan).|0-1
+MSU|[Thomsen, Afton] Kill by Greer, Kiana (from Krakoczki, Csenge).|1-1
+UI|[Makaula, Koen] Kill by Heidemann, Karli (from Jaynes, Teagan).|1-2
+MSU|[Spelts, Joelie] Kill by Prisby, Anika (from Krakoczki, Csenge).|2-2
+SUB|UI subs: Sullivan, Sarah.
+UI|[Sullivan, Sarah] Service ace (Thomsen, Afton).|3-2
+UI|[Sullivan, Sarah] Kill by Jaynes, Teagan (from Thomsen, Afton).|3-3
+MSU|[Jaynes, Teagan] Attack error by Armstrong, Alaina (from Kleidon, Keira).|3-4
+MSU|[Jaynes, Teagan] Kill by Armstrong, Alaina (from Krakoczki, Csenge).|4-4
+SUB|UI subs: Wakatake, Kailee.
+UI|[Wakatake, Kailee] Kill by Heidemann, Karli (from Krakoczki, Csenge).|4-5
+SUB|MSU subs: Tufto, Elli.
+MSU|[Heidemann, Karli] Kill by Greer, Kiana (from Kleidon, Keira).|5-5
+UI|[Kleidon, Keira] Attack error by Greer, Kiana (from Armstrong, Alaina).|5-6
+MSU|[Noble, Nicolette] Kill by Greer, Kiana (from Krakoczki, Csenge).|6-6
+UI|[Krakoczki, Csenge] Attack error by Tufto, Elli (block by Makaula, Koen; Ryan, Lucy).|7-6
+UI|[Krakoczki, Csenge] Service error.|7-7
+MSU|[Greeny, Lauren] Kill by Ryan, Lucy (from Krakoczki, Csenge).|8-7
+UI|[Greer, Kiana] Kill by Jaynes, Teagan (from Heidemann, Karli).|8-8
+MSU|[Thomsen, Afton] Kill by Makaula, Koen (from Krakoczki, Csenge).|9-8
+UI|[Makaula, Koen] Attack error by Armstrong, Alaina (from Krakoczki, Csenge).|9-9
+MSU|[Spelts, Joelie] Attack error by Ryan, Lucy (from Krakoczki, Csenge).|9-10
+MSU|[Spelts, Joelie] Service error.|10-10
+UI|[Sullivan, Sarah] Attack error by Heidemann, Karli (from Jaynes, Teagan).|11-10
+UI|[Sullivan, Sarah] Kill by Heidemann, Karli (from Jaynes, Teagan).|11-11
+MSU|[Jaynes, Teagan] Attack error by Armstrong, Alaina (block by Schloe, Lauren).|11-12
+MSU|[Jaynes, Teagan] Kill by Armstrong, Alaina (from Krakoczki, Csenge).|12-12
+UI|[Wakatake, Kailee] Service error.|12-13
+MSU|[Heidemann, Karli] Kill by Schloe, Lauren (from Jaynes, Teagan).|12-14
+MSU|[Heidemann, Karli] Kill by Tufto, Elli.|12-15
+MSU|[Heidemann, Karli] Kill by Greer, Kiana (from Krakoczki, Csenge).|13-15
+UI|[Kleidon, Keira] Kill by Greeny, Lauren (from Jaynes, Teagan).|13-16
+MSU|[Noble, Nicolette] Kill by Makaula, Koen (from Krakoczki, Csenge).|14-16
+UI|[Krakoczki, Csenge] Attack error by Greeny, Lauren (from Jaynes, Teagan).|15-16
+UI|[Krakoczki, Csenge] Service ace (Noble, Nicolette).|16-16
+UI|[Krakoczki, Csenge] Attack error by Tufto, Elli (from Jaynes, Teagan).|17-16
+SUB|MSU subs: Esko, Elli.
+UI|[Krakoczki, Csenge] Kill by Spelts, Joelie (from Jaynes, Teagan).|17-17
+MSU|[Greeny, Lauren] Service error.|18-17
+UI|[Greer, Kiana] Kill by Esko, Elli (from Jaynes, Teagan).|18-18
+MSU|[Thomsen, Afton] Service ace (Greer, Kiana).|18-19
+MSU|[Thomsen, Afton] Service ace (Kleidon, Keira).|18-20
+SUB|UI subs: Trefren, Kyriah.
+MSU|[Thomsen, Afton] Kill by Makaula, Koen (from Krakoczki, Csenge).|19-20
+UI|[Makaula, Koen] Kill by Heidemann, Karli (from Jaynes, Teagan).|19-21
+SUB|MSU subs: McDonald, Taylor.
+MSU|[Spelts, Joelie] Kill by Heidemann, Karli (from Greeny, Lauren).|19-22
+SUB|UI subs: Danielson, Sophie.
+MSU|[Spelts, Joelie] Kill by Danielson, Sophie (from Krakoczki, Csenge).|20-22
+UI|[Sullivan, Sarah] Kill by Jaynes, Teagan (from Greeny, Lauren).|20-23
+MSU|[Jaynes, Teagan] Kill by Greeny, Lauren (from Jaynes, Teagan).|20-24
+MSU|[Jaynes, Teagan] Kill by Prisby, Anika (from Krakoczki, Csenge).|21-24
+UI|[Wakatake, Kailee] Kill by Greer, Kiana (from Krakoczki, Csenge).|22-24
+UI|[Wakatake, Kailee] Service error.|22-25
+#SET 3
+UI|[Armstrong, Alaina] Service error.|0-1
+MSU|[Spelts, Joelie] Attack error by Greer, Kiana (block by Jaynes, Teagan; Schloe, Lauren).|0-2
+MSU|[Spelts, Joelie] Kill by Jaynes, Teagan.|0-3
+SUB|MSU subs: Culler, Keely.
+MSU|[Culler, Keely] Service ace (Kleidon, Keira).|0-4
+MSU|[Culler, Keely] Attack error by Greer, Kiana (from Krakoczki, Csenge).|0-5
+MSU|[Culler, Keely] Service error.|1-5
+UI|[Kleidon, Keira] Kill by Greer, Kiana (from Kleidon, Keira).|2-5
+UI|[Kleidon, Keira] Kill by Makaula, Koen (from Krakoczki, Csenge).|3-5
+UI|[Kleidon, Keira] Attack error by Greer, Kiana (from Krakoczki, Csenge).|3-6
+MSU|[Jaynes, Teagan] Service ace (Armstrong, Alaina).|3-7
+MSU|[Jaynes, Teagan] Service ace (Armstrong, Alaina).|3-8
+MSU|[Jaynes, Teagan] Kill by Greer, Kiana (from Krakoczki, Csenge).|4-8
+SUB|UI subs: Danielson, Sophie.
+UI|[Krakoczki, Csenge] Attack error by Heidemann, Karli (from Jaynes, Teagan).|5-8
+UI|[Krakoczki, Csenge] Attack error by Danielson, Sophie (block by Schloe, Lauren; Greeny, Lauren).|5-9
+SUB|MSU subs: Esko, Elli.
+MSU|[Heidemann, Karli] Attack error by Esko, Elli (from Noble, Nicolette).|6-9
+SUB|MSU subs: Steman, Alice.
+UI|[Greer, Kiana] Kill by Esko, Elli (from Jaynes, Teagan).|6-10
+MSU|[Noble, Nicolette] Attack error by Danielson, Sophie (from Krakoczki, Csenge).|6-11
+MSU|[Noble, Nicolette] Kill by Spelts, Joelie (from Jaynes, Teagan).|6-12
+MSU|[Noble, Nicolette] Service error.|7-12
+UI|[Makaula, Koen] Kill by Esko, Elli (from Jaynes, Teagan).|7-13
+MSU|[Greeny, Lauren] Service error.|8-13
+UI|[Sullivan, Sarah] Attack error by Esko, Elli (from Jaynes, Teagan).|9-13
+UI|[Sullivan, Sarah] Kill by Spelts, Joelie (from Jaynes, Teagan).|9-14
+MSU|[Thomsen, Afton] Attack error by Armstrong, Alaina (block by Spelts, Joelie; Jaynes, Teagan).|9-15
+SUB|UI subs: Ferrin, Allie.
+MSU|[Thomsen, Afton] Service ace (Sullivan, Sarah).|9-16
+MSU|[Thomsen, Afton] Kill by Heidemann, Karli (from Jaynes, Teagan).|9-17
+MSU|[Thomsen, Afton] Kill by Spelts, Joelie (from Jaynes, Teagan).|9-18
+SUB|UI subs: Smith, Gabrielle.
+SUB|MSU subs: Green Ewen, Jolene.
+MSU|[Thomsen, Afton] Kill by Greer, Kiana (from Krakoczki, Csenge).|10-18
+SUB|UI subs: Wakatake, Kailee.
+UI|[Wakatake, Kailee] Kill by Green Ewen, Jolene (from Jaynes, Teagan).|10-19
+MSU|[Culler, Keely] Service error.|11-19
+UI|[Kleidon, Keira] Kill by Greer, Kiana (from Krakoczki, Csenge).|12-19
+UI|[Kleidon, Keira] Kill by Heidemann, Karli (from Jaynes, Teagan).|12-20
+MSU|[Jaynes, Teagan] Kill by Makaula, Koen (from Krakoczki, Csenge).|13-20
+UI|[Krakoczki, Csenge] Service error.|13-21
+MSU|[Heidemann, Karli] Kill by Danielson, Sophie (from Krakoczki, Csenge).|14-21
+UI|[Greer, Kiana] Attack error by Krakoczki, Csenge.|14-22
+SUB|MSU subs: Rich, Haven.
+SUB|UI subs: Trefren, Kyriah.
+MSU|[Noble, Nicolette] Kill by Ferrin, Allie (from Trefren, Kyriah).|15-22
+UI|[Makaula, Koen] Attack error by Green Ewen, Jolene (from Jaynes, Teagan).|16-22
+UI|[Makaula, Koen] Kill by Esko, Elli (from Jaynes, Teagan).|16-23
+MSU|[Greeny, Lauren] Service error.|17-23
+UI|[Sullivan, Sarah] Kill by Esko, Elli (from Jaynes, Teagan).|17-24
+MSU|[Thomsen, Afton] Kill by Ferrin, Allie (from Krakoczki, Csenge).|18-24
+UI|[Wakatake, Kailee] Attack error by Greeny, Lauren (from Thomsen, Afton).|19-24
+UI|[Wakatake, Kailee] Kill by Greer, Kiana (from Krakoczki, Csenge).|20-24
+UI|[Wakatake, Kailee] Kill by Heidemann, Karli (from Jaynes, Teagan).|20-25

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Pop Board Replay</title>
+<meta name="description" content="The Stat Pop Board stepping through MSU vs Idaho (Oct 1, 2026) rally by rally.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<link rel="stylesheet" href="/assets/board.css?v=0.2.0">
+<script>window.__spbNoReader = true;</script>
+<script src="/spb.js?v=0.2.0"></script>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="brand"><a href="/" style="text-decoration:none;color:inherit"><b>Stat Pop Board</b></a><span class="mode replay">Replay</span></div>
+    <span class="matchline">MSU vs Idaho &middot; Oct 1, 2026 &middot; official play-by-play</span>
+    <div class="transport">
+      <button class="tbtn" id="back" type="button" aria-label="Previous rally">&#9664;</button>
+      <button class="tbtn" id="play" type="button" aria-pressed="false">Play</button>
+      <button class="tbtn" id="fwd" type="button" aria-label="Next rally">&#9654;</button>
+      <select class="speed" id="speed" aria-label="Replay speed">
+        <option value="2500">1 rally / 2.5 s</option>
+        <option value="1200" selected>1 rally / 1.2 s</option>
+        <option value="500">1 rally / 0.5 s</option>
+      </select>
+      <div class="scrub"><input type="range" id="scrub" min="0" max="137" value="0" aria-label="Rally"><output id="where" for="scrub"></output></div>
+      <button class="tbtn" type="button" data-jump="1">Set 1</button>
+      <button class="tbtn" type="button" data-jump="2">Set 2</button>
+      <button class="tbtn" type="button" data-jump="3">Set 3</button>
+      <button class="tbtn gold" id="starsbtn" type="button" aria-pressed="false">&#9733; Impact players</button>
+    </div>
+  </header>
+  <section id="picker" aria-label="Impact players" hidden></section>
+  <div id="board"></div>
+</div>
+<script src="/assets/replay.js?v=0.2.0"></script>
+<script src="/assets/replay-app.js?v=0.2.0"></script>
+</body>
+</html>
