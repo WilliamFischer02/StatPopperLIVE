@@ -23,6 +23,7 @@
 
   const board = BV.mountBoard($('board'), {
     pass: (k) => { eng.pass(k); rerender(); },
+    hold: (k) => { eng.toggleHold(k); rerender(); },
     hide: (k) => { eng.hide(k); store.set('hidden:' + eventId, eng.hiddenKeys); rerender(); },
     unhide: (k) => { eng.unhide(k); store.set('hidden:' + eventId, eng.hiddenKeys); rerender(); },
     star: (k) => {
@@ -234,7 +235,7 @@
     } else document.title = 'Stat Pop Board';
     renderCheck();
   }
-  setInterval(paint, 1000);
+  setInterval(() => { if (eng.expireHolds()) rerender(); paint(); }, 1000);
 
   function renderCheck() {
     $('check').hidden = !checkOpen;

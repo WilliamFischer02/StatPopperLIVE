@@ -10,6 +10,7 @@
 
   const board = BV.mountBoard($('board'), {
     pass: (k) => { eng.pass(k); redraw(); },
+    hold: (k) => { eng.toggleHold(k); redraw(); },
     hide: (k) => { eng.hide(k); redraw(); },
     unhide: (k) => { eng.unhide(k); redraw(); },
     star: (k) => {

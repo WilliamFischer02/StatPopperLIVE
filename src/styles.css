@@ -140,6 +140,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .pv .l { font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: .06em; color: var(--ink-3); margin-left: 4px; }
 .pop.best .pname { color: var(--ink); }
 .pop.best .pv .v { font-size: 21px; }
+/* Greyed: filler cards and options shown to keep each side full, below pop level for now. */
+.pcard.is-dim, .tcard.is-dim { opacity: .5; }
+.pcard.is-dim:hover, .pcard.is-dim:focus-within { opacity: .85; }
+.pop.dim .pname, .pop.dim .pv .v { color: var(--ink-3); }
 
 /* ---------- footer */
 .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: 13px; color: var(--ink-3); }

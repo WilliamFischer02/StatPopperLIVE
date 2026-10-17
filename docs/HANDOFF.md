@@ -1,8 +1,8 @@
-# Handoff: status as of 2026-10-17 (v0.2.1)
+# Handoff: status as of 2026-10-17 (v0.3.0)
 
 ## TL;DR
 
-- The site is live at https://stat-pop-board.vercel.app. v0.2.0 went up at about 11:15 MT and v0.2.1 (Tampermonkey hardening) that afternoon. Both passed the full end-to-end suite.
+- The site is live at https://stat-pop-board.vercel.app. v0.2.0 went up at about 11:15 MT, v0.2.1 (Tampermonkey hardening) that afternoon, and v0.3.0 (Pin button, always-full board with greyed filler) at about 3:30 pm. Each passed the full end-to-end suite.
 - Source of truth: the GitHub repo `WilliamFischer02/StatPopperLIVE`. The full decision log and research are in `docs/CONTEXT.md`.
 - **The main unknown:** the reader has never seen a real StatBroadcast page. Its parsing is based on StatCrew conventions and a mock page. The first real match is the calibration run.
 - The site was first deployed through the Vercel API, before this repo existed. Once the repo is connected to the Vercel project, Git pushes take over (see "Deployment notes").
@@ -15,6 +15,7 @@
 | Oct 10 | Scope set: surface only notable stats (never "1 block"), with combo pops. Layout: game/console top-left, team pops top-right, 3 home cards bottom-left, 3 away bottom-right. Also: last-play keyword pinning, Pass and Hide, alerts (set/match point, timeout, challenge, penalty) and a rotation tracker. Built the engine, a replay of MSU 3–0 Idaho (Oct 1) and a v0.1 Tampermonkey in-tab overlay. |
 | Oct 17 (morning) | Moved to Vercel. Both pages run on one computer, and Tampermonkey may not be allowed on the work machine. Added the board page with paste-a-link (an event ID or URL opens the stats tab), the bookmarklet and console starters, `/setup`, `/practice`, impact-player stars (MSU roster preloaded, MSU stars kept across matches, opponents keyed by team code), a per-event engine reset, and Reader check with "Copy for Claude". Deployed v0.2.0. |
 | Oct 17 (afternoon) | v0.2.1: one-click Tampermonkey install that pulls the reader through `@require` and updates itself; setup steps for Chrome 138+ (Allow User Scripts) and older Chrome/Edge (Developer mode); a pre-game test on a finished real match; the board warns about an outdated reader. Repo pushed to StatPopperLIVE. |
+| Oct 17 (3 pm) | v0.3.0, PR from `feat/pin-team-stats-fill`. William saw cards pop in and out on the practice page, and team pops that were almost only runs. Added: **Pin** on each player card (10 minutes or until Unpin, still updating); each side always fills 3 player cards and 2 team cards (team hit %, kills, blocks, digs, aces and set hit % as filler); at least 2 options per card; filler cards and options greyed until they reach pop level; a 4-rally stickiness bonus for new cards. On the Idaho replay, cards gone within 2 rallies of arriving fell from 56 to 24. Also: the build and e2e test now run on Windows (LF output, UTF-8 reads, `.gitattributes`). |
 
 ## Decisions (don't reopen without William)
 
@@ -22,6 +23,7 @@
 - **The reader runs in the user's tab and hands off to the board with `postMessage`.** Both windows must be on the same computer.
 - **The bookmarklet is the main way to start the reader** on the work computer. Console paste and Tampermonkey are fallbacks.
 - **Volleyball first.** Basketball and football come later.
+- **Full board with greyed filler (v0.3.0, William's call).** Each side always shows 3 player cards and 2 team cards, even when a stat is minor; minor ones are greyed rather than hidden. This replaces the Oct 10 "never show 1 block" rule.
 - **Dark board, typed-pop wording.** Pop names match William's graphics software buttons, and he types team stats ("4-0 Scoring Run", "Team Hit% 0.327", "28 Team Blocks") himself, using the board's team cards as suggestions.
 
 ## Unverified and at risk

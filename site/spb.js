@@ -1,11 +1,11 @@
-/* Stat Pop Board 0.2.1: reads only the page you have open and shares it with the board window on this computer. */
+/* Stat Pop Board 0.3.0: reads only the page you have open and shares it with the board window on this computer. */
 (function () {
 'use strict';
 if (window.SPB && window.SPB.version) { if (!window.__spbNoReader && window.SPB.show) window.SPB.show(); return; }
 var cs = document.currentScript;
-var SPB = { version: "0.2.1" };
+var SPB = { version: "0.3.0" };
 SPB.origin = window.__spbOrigin || (cs && cs.src ? new URL(cs.src, location.href).origin : null) || "https://stat-pop-board.vercel.app";
-SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.2.1' : null;
+SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.3.0' : null;
 SPB.fontsHref = "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap";
 SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos":"OH"},{"uni":"5","first":"Keely","last":"Culler","pos":"OH"},{"uni":"6","first":"Teagan","last":"Jaynes","pos":"S"},{"uni":"7","first":"Lauren","last":"Schloe","pos":"MB/OPP"},{"uni":"9","first":"Maggie","last":"Rhew","pos":"S/DS"},{"uni":"11","first":"Elli","last":"Esko","pos":"OH"},{"uni":"12","first":"Afton","last":"Thomsen","pos":"L/DS"},{"uni":"13","first":"Jolene","last":"Green Ewen","pos":"MB"},{"uni":"14","first":"Taylor","last":"McDonald","pos":"MH/OPP"},{"uni":"15","first":"Teya","last":"Yeomans","pos":"OH"},{"uni":"16","first":"Haven","last":"Rich","pos":"L/DS"},{"uni":"17","first":"Alice","last":"Steman","pos":"MB"},{"uni":"18","first":"Karli","last":"Heidemann","pos":"OH"},{"uni":"22","first":"Joelie","last":"Spelts","pos":"MB"},{"uni":"23","first":"Elli","last":"Tufto","pos":"OH"},{"uni":"45","first":"Nicolette","last":"Noble","pos":"L/DS"}] };
 /*
@@ -233,10 +233,19 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
 
   // ------------------------------------------------------------------ engine
 
+  // Rough "how much has this player done" for ranking filler cards: each stat over its pop minimum.
+  const ACTIVITY_MINS = { k: 4, dig: 5, a: 10, tb: 2, sa: 2 };
+  const activityOf = (p) => Object.keys(ACTIVITY_MINS).reduce((a, f) => a + p[f] / ACTIVITY_MINS[f], 0);
+
   function create(opts) {
     opts = opts || {};
-    const cfg = { pops: VB_POPS, maxCards: 3, maxPops: 3, maxTeamCards: 2, passRallies: 10 };
-    const user = { hidden: new Set(), passed: {}, stars: { home: [], away: [] } };
+    const clock = opts.now || (() => Date.now());
+    // minPops: options per player card, filling with greyed lines if needed. holdMs: how long Pin keeps a card.
+    // dwellRallies: a card that just arrived gets a stickiness bonus for this many rallies, so cards don't flicker.
+    const cfg = { pops: VB_POPS, maxCards: 3, maxPops: 3, minPops: 2, maxTeamCards: 2, passRallies: 10,
+      holdMs: 10 * 60 * 1000, dwellRallies: 4 };
+    // held: cards William pinned with the Pin button, key -> { since, until } in clock ms.
+    const user = { hidden: new Set(), passed: {}, stars: { home: [], away: [] }, held: {} };
     let mem, last;
     const freshServe = () => ({ side: null, uni: null, streak: 0, turns: { home: [], away: [] }, lastTurnSide: null });
 
@@ -245,7 +254,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         rally: 0, set: null, lastScore: null, setsWon: { home: 0, away: 0 },
         points: [], plays: [], involvement: [], pins: { home: null, away: null },
         serve: freshServe(),
-        prevSel: { home: [], away: [] }, prevTeam: { home: [], away: [] },
+        prevSel: { home: [], away: [] }, prevTeam: { home: [], away: [] }, since: {},
         consoleAlert: null, setWon: null,
         prevTotals: null, setStart: null, finishedSet: null,
       };
@@ -388,8 +397,9 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         const A = fs.stats[side], B = fs.stats[other(side)];
         if (A.ta > 0) c.push({ id: 'setsum', score: 9, big: `Set ${fs.set}: ${A.k} Kills, ${fmtPct(A.pct, true)} Hit%`, sub: `${oc} ${B.k} K, ${fmtPct(B.pct, true)}` });
       }
+      let S = null, So = null;
       if (mem.setStart && !(fs && fs.set === num(s.set))) {
-        const S = diffTotals(T, mem.setStart[side]), So = diffTotals(O, mem.setStart[other(side)]);
+        S = diffTotals(T, mem.setStart[side]); So = diffTotals(O, mem.setStart[other(side)]);
         const n = (S.pct - 0.2) / 0.06;
         if (S.ta >= 15 && S.pct >= 0.3 && n >= 1.5) c.push({ id: 'sethit', score: n * 0.9, big: `Set ${s.set} Hit% ${fmtPct(S.pct, true)}`, sub: `${oc} ${fmtPct(So.pct, true)} this set` });
       }
@@ -416,6 +426,20 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       if (T.sa >= 3 && (T.sa >= O.sa + 3 || T.sa / e >= 1.6)) c.push({ id: 'ace', score: 1 + (T.sa - O.sa) / 3, big: `${T.sa} Team Aces`, sub: `${oc} ${O.sa}` });
       if (T.dig >= O.dig + 8 || T.dig / e >= 16) c.push({ id: 'dig', score: T.dig / (14 * e) + (T.dig - O.dig) / 12, big: `${T.dig} Team Digs`, sub: `${oc} ${O.dig}` });
       if (T.se >= 3 * e && T.se >= O.se + 3) c.push({ id: 'se', score: 0.9, big: `${T.se} Service Errors`, sub: `${oc} ${O.se}` });
+
+      // Fillers: the everyday team lines, so each side always has its team cards. They show greyed (dim)
+      // until they clear the bars above, and always rank below a real pop (score <= 0.75 with stability).
+      const have = new Set(c.map((x) => x.id));
+      const fill = (id, ok, ratio, big, sub) => {
+        if (!have.has(id) && ok) c.push({ id, dim: true, score: 0.05 + 0.5 * Math.max(0, Math.min(1, ratio)), big, sub });
+      };
+      fill('hit', T.ta >= 10, (T.pct - 0.1) / 0.2, `Team Hit% ${fmtPct(T.pct, true)}`, `${oc} ${fmtPct(O.pct, true)}`);
+      const pl = (n, word) => `${n} Team ${word}${+n === 1 ? '' : 's'}`;
+      fill('kills', T.k > 0, T.k / (13.5 * e), pl(T.k, 'Kill'), `${oc} ${O.k}`);
+      fill('blk', T.tb > 0, T.tb / (2 * e), pl(fmtHalf(T.tb), 'Block'), `${T.bs} solo · ${T.ba} assisted · ${oc} ${fmtHalf(O.tb)}`);
+      fill('dig', T.dig > 0, T.dig / (14 * e), pl(T.dig, 'Dig'), `${oc} ${O.dig}`);
+      fill('ace', T.sa > 0, T.sa / (1.5 * e), pl(T.sa, 'Ace'), `${oc} ${O.sa}`);
+      if (S) fill('sethit', S.ta >= 8, (S.pct - 0.1) / 0.2, `Set ${s.set} Hit% ${fmtPct(S.pct, true)}`, `${oc} ${fmtPct(So.pct, true)} this set`);
 
       const prev = mem.prevTeam[side];
       for (const x of c) if (prev.includes(x.id)) x.score += 0.2;
@@ -446,6 +470,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       const starred = (user.stars[side] || []).some((st) => matchesStar(p, st));
       const pin = mem.pins[side];
       const pinned = !!(pin && pin.key === key && mem.rally - pin.rally <= 1);
+      const hold = user.held[key] && user.held[key].until > clock() ? user.held[key] : null;
       const serving = sv.side === side && sv.uni === p.uni && sv.streak >= 3;
       const recent = mem.involvement.filter((x) => x.key === key && mem.rally - x.rally <= 12).reduce((a, x) => a + x.w, 0);
       const best = pops[0] ? pops[0].score : 0;
@@ -455,8 +480,8 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       if (serving) impact += 1.2;
       if (starred) impact += 0.35;
       if (pinned) impact += 100;
-      return { key, side, p, N, pops, badges, pinned, pin: pinned ? pin : null, serving, starred, impact,
-        eligible: pinned || serving || best >= 0.85 };
+      return { key, side, p, N, pops, badges, pinned, pin: pinned ? pin : null, serving, starred, impact, hold,
+        activity: activityOf(p) + 0.2 * Math.min(4, recent), eligible: pinned || serving || best >= 0.85 };
     }
 
     function cardFor(c, sv, teamLeads) {
@@ -474,15 +499,22 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         const all = raw().filter((x) => x.uses.includes(force)).sort(simplest);
         if (all[0]) pops = [all[0]].concat(pops).slice(0, cfg.maxPops);
       }
-      if (!pops.length) {
-        // On the board for a live reason but nothing is notable yet: show the strongest raw line.
-        const MINS = { k: 4, dig: 5, a: 10, tb: 2, sa: 1 };
-        const singles = raw().filter((x) => x.uses.length === 1 && MINS[x.uses[0]] && p[x.uses[0]] > 0)
+      if (pops.length < cfg.minPops) {
+        // Fewer notable options than the card should offer: add the player's strongest raw lines
+        // (single stats the player actually has), shown greyed until they reach pop level.
+        const MINS = { k: 4, dig: 5, a: 10, tb: 2, sa: 1, pts: 8 };
+        const singles = raw().filter((x) => x.uses.length === 1 && x.id !== 'atk' && MINS[x.uses[0]] && p[x.uses[0]] > 0
+            && (x.id !== 'pts' || [p.k, p.sa, p.tb].filter((v) => v > 0).length >= 2))
           .sort((a, b) => p[b.uses[0]] / MINS[b.uses[0]] - p[a.uses[0]] / MINS[a.uses[0]]);
-        if (singles[0]) pops = [singles[0]];
+        for (const x of singles) {
+          if (pops.length >= cfg.minPops) break;
+          if (!covered(x, pops)) pops.push(x);
+        }
       }
-      pops = pops.map((x, i) => ({ id: x.id, name: x.name, parts: x.parts, score: x.score, best: i === 0,
-        live: !!force && x.uses.includes(force) }));
+      pops = pops.map((x, i) => {
+        const live = !!force && x.uses.includes(force);
+        return { id: x.id, name: x.name, parts: x.parts, score: x.score, best: i === 0, live, dim: !live && x.score < 0.8 };
+      });
       let tag = null;
       if (c.pin) tag = { kind: 'live', text: (mem.rally - c.pin.rally === 0 ? 'Just now · ' : 'Last rally · ') + c.pin.label };
       else if (c.serving) tag = { kind: 'serve', text: `On serve · ${sv.streak} straight` };
@@ -493,7 +525,10 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       }
       if (c.serving && c.pin) reason = [`On serve · ${sv.streak} straight`, reason].filter(Boolean).join(' · ');
       return { key: c.key, side: c.side, uni: p.uni, first: p.first, last: p.last, tag, reason, pops,
-        starred: !!c.starred, impact: Math.round(c.impact * 100) / 100 };
+        starred: !!c.starred, impact: Math.round(c.impact * 100) / 100,
+        held: c.hold ? { until: c.hold.until } : null,
+        // Greyed: on the board only to fill the side's cards, not for a notable stat or a live reason.
+        dim: !c.eligible && !c.hold };
     }
 
     function playerCards(s, side, e, highs) {
@@ -506,16 +541,22 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       }
       const pool = players.map((p) => scorePlayer(p, side, e, highs, s, sv))
         .filter((c) => !user.hidden.has(c.key))
-        .filter((c) => c.pinned || !(user.passed[c.key] > mem.rally))
-        .sort((a, b) => b.impact - a.impact);
-      const chosen = pool.filter((c) => c.eligible).slice(0, cfg.maxCards);
+        .filter((c) => c.pinned || c.hold || !(user.passed[c.key] > mem.rally));
+      // Order: cards William pinned, then notable or live cards by impact, then the most active of the
+      // rest (greyed) so the side always has its full set. A card that just arrived is sticky for a few rallies.
+      const prevKeys = new Set(mem.prevSel[side]);
+      const sticky = (c) => (prevKeys.has(c.key) && mem.rally - (mem.since[c.key] ?? -1e9) <= cfg.dwellRallies ? 1.5 : 0);
+      const rank = (c) => (c.eligible ? 10 + c.impact : c.activity + (prevKeys.has(c.key) ? 0.5 : 0) + (c.starred ? 0.35 : 0)) + sticky(c);
+      const held = pool.filter((c) => c.hold).sort((a, b) => a.hold.since - b.hold.since).slice(0, cfg.maxCards);
+      const rest = pool.filter((c) => !c.hold && (c.eligible || c.starred || c.activity > 0)).sort((a, b) => rank(b) - rank(a));
+      const chosen = held.concat(rest).slice(0, cfg.maxCards);
       // Impact players: at least one starred player always has a card on their side.
-      const starredPool = pool.filter((c) => c.starred);
+      const starredPool = rest.filter((c) => c.starred);
       if (starredPool.length && !chosen.some((c) => c.starred)) {
         if (chosen.length < cfg.maxCards) chosen.push(starredPool[0]);
         else {
           let idx = -1;
-          for (let i = chosen.length - 1; i >= 0; i--) if (!chosen[i].pinned) { idx = i; break; }
+          for (let i = chosen.length - 1; i >= 0; i--) if (!chosen[i].pinned && !chosen[i].hold) { idx = i; break; }
           if (idx >= 0) chosen[idx] = starredPool[0];
         }
       }
@@ -527,6 +568,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       for (const c of chosen) if (!placed.has(c.key)) { const i = slots.indexOf(null); slots[i] = c.key; placed.add(c.key); }
       const prevSet = new Set(mem.prevSel[side]);
       mem.prevSel[side] = slots.filter(Boolean);
+      for (const k of mem.prevSel[side]) if (!prevSet.has(k)) mem.since[k] = mem.rally;
       const byKey = Object.fromEntries(chosen.map((c) => [c.key, c]));
       return slots.filter(Boolean).map((k) => ({ ...cardFor(byKey[k], sv, teamLeads), isNew: !prevSet.has(k) }));
     }
@@ -646,8 +688,28 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         return compute();
       },
       view() { return last ? compute() : null; },
-      pass(key) { user.passed[key] = mem.rally + cfg.passRallies; if (mem.pins.home && mem.pins.home.key === key) mem.pins.home = null; if (mem.pins.away && mem.pins.away.key === key) mem.pins.away = null; },
-      hide(key) { user.hidden.add(key); },
+      pass(key) { delete user.held[key]; user.passed[key] = mem.rally + cfg.passRallies; if (mem.pins.home && mem.pins.home.key === key) mem.pins.home = null; if (mem.pins.away && mem.pins.away.key === key) mem.pins.away = null; },
+      hide(key) { delete user.held[key]; user.hidden.add(key); },
+      // Pin button: keep a player's card on the board (live-updating) for holdMs, or until pinned again.
+      // Each side holds at most maxCards pins; pinning one more releases that side's oldest.
+      toggleHold(key) {
+        const now = clock();
+        if (user.held[key] && user.held[key].until > now) { delete user.held[key]; return false; }
+        const side = String(key).split(':')[0];
+        const mine = Object.keys(user.held).filter((k) => k.split(':')[0] === side && user.held[k].until > now)
+          .sort((a, b) => user.held[a].since - user.held[b].since);
+        while (mine.length >= cfg.maxCards) delete user.held[mine.shift()];
+        delete user.passed[key];
+        user.held[key] = { since: now, until: now + cfg.holdMs };
+        return true;
+      },
+      // Drops pins whose time is up. Returns true when one did, so the page knows to redraw.
+      expireHolds() {
+        const now = clock();
+        let gone = false;
+        for (const k of Object.keys(user.held)) if (user.held[k].until <= now) { delete user.held[k]; gone = true; }
+        return gone;
+      },
       unhide(key) { user.hidden.delete(key); },
       get hiddenKeys() { return [...user.hidden]; },
       setHidden(keys) { user.hidden = new Set(keys || []); },
@@ -696,21 +758,26 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       return parts.map((p) => `<span class="pv"><span class="v">${esc(p.v)}</span><span class="l">${esc(p.l)}</span></span>`).join('');
     }
 
+    const clockTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
     function playerCard(c) {
       const live = c.tag && c.tag.kind === 'live';
       const tag = c.tag ? (live ? `<span class="livedot">${esc(c.tag.text)}</span>` : `<span class="tag-serve">${esc(c.tag.text)}</span>`) : '';
       const reason = c.reason ? `<span>${esc(c.reason)}</span>` : '';
       const star = c.starred ? '<span class="impact">★ Impact</span>' : '';
+      const held = c.held ? `<span class="held">Pinned · until ${esc(clockTime(c.held.until))}</span>` : '';
       const starBtn = handlers.star
         ? `<button class="abtn star${c.starred ? ' on' : ''}" data-act="star" data-key="${esc(c.key)}" aria-pressed="${c.starred}" title="${c.starred ? 'Remove from impact players' : 'Make an impact player'}" aria-label="Impact player">★</button>` : '';
+      const pinBtn = handlers.hold
+        ? `<button class="abtn pin${c.held ? ' on' : ''}" data-act="hold" data-key="${esc(c.key)}" aria-pressed="${!!c.held}" title="${c.held ? 'Let this card go' : 'Keep this card on the board for 10 minutes'}">${c.held ? 'Unpin' : 'Pin'}</button>` : '';
       const pops = c.pops.length
-        ? c.pops.map((p) => `<li class="pop${p.best ? ' best' : ''}${p.live ? ' live' : ''}"><span class="pname">${esc(p.name)}</span><span class="pvals">${partsHTML(p.parts)}</span></li>`).join('')
+        ? c.pops.map((p) => `<li class="pop${p.best ? ' best' : ''}${p.live ? ' live' : ''}${p.dim ? ' dim' : ''}"><span class="pname">${esc(p.name)}</span><span class="pvals">${partsHTML(p.parts)}</span></li>`).join('')
         : '<li class="pop none">No stats yet</li>';
-      return `<article class="pcard${live ? ' is-live' : ''}${c.isNew ? ' is-new' : ''}${c.starred ? ' is-star' : ''}">
+      return `<article class="pcard${live ? ' is-live' : ''}${c.isNew ? ' is-new' : ''}${c.starred ? ' is-star' : ''}${c.held ? ' is-held' : ''}${c.dim ? ' is-dim' : ''}" data-key="${esc(c.key)}">
         <div class="phead">
           <div class="jersey" aria-label="Number ${esc(c.uni)}">${esc(c.uni)}</div>
-          <div class="who"><div class="last">${esc(c.last)}</div><div class="meta"><span>${esc(c.first)}</span>${star}${tag}${reason}</div></div>
-          <div class="acts">${starBtn}
+          <div class="who"><div class="last">${esc(c.last)}</div><div class="meta"><span>${esc(c.first)}</span>${held}${star}${tag}${reason}</div></div>
+          <div class="acts">${pinBtn}${starBtn}
             <button class="abtn" data-act="pass" data-key="${esc(c.key)}" title="Skip this player for the next 10 rallies">Pass</button>
             <button class="abtn" data-act="hide" data-key="${esc(c.key)}" title="Hide this player for the rest of the match">Hide</button>
           </div>
@@ -723,7 +790,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       const t = v.teams[side];
       const cards = v.playerCards[side];
       const empty = cards.length < 3
-        ? `<div class="empty">${cards.length ? 'No other' : 'No'} ${esc(t.code)} player stands out yet.</div>` : '';
+        ? `<div class="empty">${cards.length ? 'No other' : 'No'} ${esc(t.code)} player has a stat yet.</div>` : '';
       regions[side].innerHTML = `<div class="eyebrow"><span class="swatch"></span>${esc(t.name || t.code)} players</div>
         <div class="pstack">${cards.map(playerCard).join('')}${empty}</div>`;
     }
@@ -733,8 +800,8 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         const t = v.teams[side];
         const cards = v.teamCards[side];
         const body = cards.length
-          ? cards.map((c) => `<div class="tcard${c.live ? ' is-live' : ''}"><div class="big">${esc(c.big)}</div><div class="sub">${c.live ? '<span class="livedot">Live</span> ' : ''}${esc(c.sub || '')}</div></div>`).join('')
-          : `<div class="empty">No standout ${esc(t.code)} team stat right now.</div>`;
+          ? cards.map((c) => `<div class="tcard${c.live ? ' is-live' : ''}${c.dim ? ' is-dim' : ''}"><div class="big">${esc(c.big)}</div><div class="sub">${c.live ? '<span class="livedot">Live</span> ' : ''}${esc(c.sub || '')}</div></div>`).join('')
+          : `<div class="empty">No ${esc(t.code)} team stats yet.</div>`;
         return `<div class="tcol side-${side}"><div class="eyebrow"><span class="swatch"></span>${esc(t.code)}</div>${body}</div>`;
       };
       regions.team.innerHTML = `<div class="eyebrow">Team pops</div><div class="tcols">${col('home')}${col('away')}</div>`;
@@ -1225,6 +1292,7 @@ function startReader(SPB) {
     $('swap').addEventListener('click', () => { swapped = !swapped; store.set('swap', swapped); resetEngine(); tick(true); });
     board = BV.mountBoard($('board'), {
       pass: (k) => { eng.pass(k); board.render(eng.view()); },
+      hold: (k) => { eng.toggleHold(k); board.render(eng.view()); },
       hide: (k) => { eng.hide(k); saveHidden(); board.render(eng.view()); },
       unhide: (k) => { eng.unhide(k); saveHidden(); board.render(eng.view()); },
     });
@@ -1331,6 +1399,9 @@ function startReader(SPB) {
       if (force || hash !== lastHash || fresh.length) {
         lastHash = hash; lastChange = Date.now();
         inTabView = eng.update(PE.swapSides(snap, swapped), fresh.map((l) => l.text).slice(-3));
+        if (overlayOpen()) board.render(inTabView);
+      } else if (eng.expireHolds()) {
+        inTabView = eng.view();
         if (overlayOpen()) board.render(inTabView);
       }
       if (overlayOpen()) {

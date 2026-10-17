@@ -34,21 +34,26 @@
       return parts.map((p) => `<span class="pv"><span class="v">${esc(p.v)}</span><span class="l">${esc(p.l)}</span></span>`).join('');
     }
 
+    const clockTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
     function playerCard(c) {
       const live = c.tag && c.tag.kind === 'live';
       const tag = c.tag ? (live ? `<span class="livedot">${esc(c.tag.text)}</span>` : `<span class="tag-serve">${esc(c.tag.text)}</span>`) : '';
       const reason = c.reason ? `<span>${esc(c.reason)}</span>` : '';
       const star = c.starred ? '<span class="impact">★ Impact</span>' : '';
+      const held = c.held ? `<span class="held">Pinned · until ${esc(clockTime(c.held.until))}</span>` : '';
       const starBtn = handlers.star
         ? `<button class="abtn star${c.starred ? ' on' : ''}" data-act="star" data-key="${esc(c.key)}" aria-pressed="${c.starred}" title="${c.starred ? 'Remove from impact players' : 'Make an impact player'}" aria-label="Impact player">★</button>` : '';
+      const pinBtn = handlers.hold
+        ? `<button class="abtn pin${c.held ? ' on' : ''}" data-act="hold" data-key="${esc(c.key)}" aria-pressed="${!!c.held}" title="${c.held ? 'Let this card go' : 'Keep this card on the board for 10 minutes'}">${c.held ? 'Unpin' : 'Pin'}</button>` : '';
       const pops = c.pops.length
-        ? c.pops.map((p) => `<li class="pop${p.best ? ' best' : ''}${p.live ? ' live' : ''}"><span class="pname">${esc(p.name)}</span><span class="pvals">${partsHTML(p.parts)}</span></li>`).join('')
+        ? c.pops.map((p) => `<li class="pop${p.best ? ' best' : ''}${p.live ? ' live' : ''}${p.dim ? ' dim' : ''}"><span class="pname">${esc(p.name)}</span><span class="pvals">${partsHTML(p.parts)}</span></li>`).join('')
         : '<li class="pop none">No stats yet</li>';
-      return `<article class="pcard${live ? ' is-live' : ''}${c.isNew ? ' is-new' : ''}${c.starred ? ' is-star' : ''}">
+      return `<article class="pcard${live ? ' is-live' : ''}${c.isNew ? ' is-new' : ''}${c.starred ? ' is-star' : ''}${c.held ? ' is-held' : ''}${c.dim ? ' is-dim' : ''}" data-key="${esc(c.key)}">
         <div class="phead">
           <div class="jersey" aria-label="Number ${esc(c.uni)}">${esc(c.uni)}</div>
-          <div class="who"><div class="last">${esc(c.last)}</div><div class="meta"><span>${esc(c.first)}</span>${star}${tag}${reason}</div></div>
-          <div class="acts">${starBtn}
+          <div class="who"><div class="last">${esc(c.last)}</div><div class="meta"><span>${esc(c.first)}</span>${held}${star}${tag}${reason}</div></div>
+          <div class="acts">${pinBtn}${starBtn}
             <button class="abtn" data-act="pass" data-key="${esc(c.key)}" title="Skip this player for the next 10 rallies">Pass</button>
             <button class="abtn" data-act="hide" data-key="${esc(c.key)}" title="Hide this player for the rest of the match">Hide</button>
           </div>
@@ -61,7 +66,7 @@
       const t = v.teams[side];
       const cards = v.playerCards[side];
       const empty = cards.length < 3
-        ? `<div class="empty">${cards.length ? 'No other' : 'No'} ${esc(t.code)} player stands out yet.</div>` : '';
+        ? `<div class="empty">${cards.length ? 'No other' : 'No'} ${esc(t.code)} player has a stat yet.</div>` : '';
       regions[side].innerHTML = `<div class="eyebrow"><span class="swatch"></span>${esc(t.name || t.code)} players</div>
         <div class="pstack">${cards.map(playerCard).join('')}${empty}</div>`;
     }
@@ -71,8 +76,8 @@
         const t = v.teams[side];
         const cards = v.teamCards[side];
         const body = cards.length
-          ? cards.map((c) => `<div class="tcard${c.live ? ' is-live' : ''}"><div class="big">${esc(c.big)}</div><div class="sub">${c.live ? '<span class="livedot">Live</span> ' : ''}${esc(c.sub || '')}</div></div>`).join('')
-          : `<div class="empty">No standout ${esc(t.code)} team stat right now.</div>`;
+          ? cards.map((c) => `<div class="tcard${c.live ? ' is-live' : ''}${c.dim ? ' is-dim' : ''}"><div class="big">${esc(c.big)}</div><div class="sub">${c.live ? '<span class="livedot">Live</span> ' : ''}${esc(c.sub || '')}</div></div>`).join('')
+          : `<div class="empty">No ${esc(t.code)} team stats yet.</div>`;
         return `<div class="tcol side-${side}"><div class="eyebrow"><span class="swatch"></span>${esc(t.code)}</div>${body}</div>`;
       };
       regions.team.innerHTML = `<div class="eyebrow">Team pops</div><div class="tcols">${col('home')}${col('away')}</div>`;

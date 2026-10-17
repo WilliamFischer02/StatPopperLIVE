@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
-<link rel="stylesheet" href="/assets/board.css?v=0.2.1">
+<link rel="stylesheet" href="/assets/board.css?v=0.3.0">
 </head>
 <body>
 <main class="page">
@@ -69,11 +69,11 @@
       <textarea id="tmcode" readonly rows="10" style="width:100%;font-family:var(--font-data);font-size:12px;background:var(--ground);color:var(--ink-2);border:1px solid var(--rule);border-radius:6px;padding:8px" aria-label="Tampermonkey script">// ==UserScript==
 // @name         Stat Pop Board reader
 // @namespace    goob-entertainment.stat-pop-board
-// @version      0.2.1
+// @version      0.3.0
 // @description  Starts the Stat Pop Board reader on StatBroadcast pages. It reads only the page you have open.
 // @match        https://stats.statbroadcast.com/broadcast/*
 // @match        https://*.statbroadcast.com/broadcast/*
-// @require      https://stat-pop-board.vercel.app/spb.js?v=0.2.1
+// @require      https://stat-pop-board.vercel.app/spb.js?v=0.3.0
 // @updateURL    https://stat-pop-board.vercel.app/stat-pop-board.user.js
 // @downloadURL  https://stat-pop-board.vercel.app/stat-pop-board.user.js
 // @run-at       document-idle
@@ -97,6 +97,6 @@
 
   <p class="small">What it reads: the score in the stats tab&rsquo;s title, the box-score tables, and new play-by-play lines. It sends them only to the board window on this computer. Nothing goes to a server; your impact-player picks and hidden players are saved in this browser.</p>
 </main>
-<script src="/assets/setup.js?v=0.2.1"></script>
+<script src="/assets/setup.js?v=0.3.0"></script>
 </body>
 </html>

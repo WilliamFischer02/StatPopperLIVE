@@ -21,7 +21,7 @@ args = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 args.add_argument("--check", action="store_true", help="build to a temp folder and compare with site/")
 args = args.parse_args()
 OUT = Path(tempfile.mkdtemp(prefix="spb-site-")) if args.check else SITE
-VERSION = "0.2.1"
+VERSION = "0.3.0"
 # Where the live site is served. The reader falls back to this when nothing else tells it where the board is
 # (Tampermonkey's @require gives it no script URL), and the one-click Tampermonkey script points here.
 PROD_ORIGIN = "https://stat-pop-board.vercel.app"
@@ -29,6 +29,13 @@ FONTS = "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;
 TRAILER = "})(typeof globalThis !== 'undefined' ? globalThis : this);"
 
 read = lambda n: (SRC / n).read_text(encoding="utf-8")
+
+
+def write(path, text):
+    """Write with LF line endings on every OS, so site/ is byte-identical whether built on Windows or Linux."""
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 if OUT.exists():
     shutil.rmtree(OUT)
 (OUT / "assets").mkdir(parents=True)
@@ -40,7 +47,7 @@ def private(name):
     return code.replace(TRAILER, "})(SPB);")
 
 
-roster = json.loads((DATA / "msu-wvb-roster-2026.json").read_text())["players"]
+roster = json.loads((DATA / "msu-wvb-roster-2026.json").read_text(encoding="utf-8"))["players"]
 
 bundle = f"""/* Stat Pop Board {VERSION}: reads only the page you have open and shares it with the board window on this computer. */
 (function () {{
@@ -60,16 +67,16 @@ window.SPB = SPB;
 if (!window.__spbNoReader) {{ var r = startReader(SPB); SPB.show = r.show; }}
 }})();
 """
-(OUT / "spb.js").write_text(bundle, encoding="utf-8")
-(OUT / "assets" / "board.css").write_text(read("styles.css") + "\n" + read("site.css"), encoding="utf-8")
-src = json.loads((DATA / "replay-src.json").read_text())
+write(OUT / "spb.js", bundle)
+write(OUT / "assets" / "board.css", read("styles.css") + "\n" + read("site.css"))
+src = json.loads((DATA / "replay-src.json").read_text(encoding="utf-8"))
 assert "`" not in src["pbp"] and "${" not in src["pbp"]
 box_js = "{\n" + ",\n".join(f'"{t}":[\n' + ",\n".join(json.dumps(r, separators=(",", ":")) for r in rows) + "]" for t, rows in src["box"].items()) + "}"
 replay_src_js = ("window.REPLAY_DATA=ReplayParse.build({\nmatch:" + json.dumps(src["match"], separators=(",", ":"))
                  + ",\nbox:" + box_js + ",\npbp:`" + src["pbp"] + "`});\n")
-(OUT / "assets" / "replay.js").write_text(read("replay.js") + "\n" + read("replay-parse.js") + "\n" + replay_src_js, encoding="utf-8")
+write(OUT / "assets" / "replay.js", read("replay.js") + "\n" + read("replay-parse.js") + "\n" + replay_src_js)
 for src, dst in [("app-live.js", "live.js"), ("app-replay.js", "replay-app.js"), ("app-practice.js", "practice.js"), ("app-setup.js", "setup.js")]:
-    (OUT / "assets" / dst).write_text(read(src), encoding="utf-8")
+    write(OUT / "assets" / dst, read(src))
 
 # Tampermonkey script. The reader comes in through @require, which Tampermonkey downloads itself, so a stats page
 # that blocks outside <script> tags can't stop it. @updateURL lets Tampermonkey pick up new versions on its own.
@@ -89,9 +96,9 @@ USERSCRIPT = f"""// ==UserScript==
 // ==/UserScript==
 // The reader itself arrives through @require above and starts on its own. Nothing else to do here.
 """
-(OUT / "stat-pop-board.user.js").write_text(USERSCRIPT, encoding="utf-8")
+write(OUT / "stat-pop-board.user.js", USERSCRIPT)
 
-(OUT / "favicon.svg").write_text(
+write(OUT / "favicon.svg",
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#0f1317"/>'
     '<rect x="6" y="7" width="20" height="5" rx="1.5" fill="#4f8ff0"/><rect x="6" y="14" width="20" height="5" rx="1.5" fill="#cdb57a"/>'
     '<rect x="6" y="21" width="13" height="5" rx="1.5" fill="#ff4b3e"/></svg>')
@@ -115,7 +122,7 @@ def head(title, desc, board_css=True):
 
 BRAND = '<a class="brand" href="/" style="text-decoration:none;color:inherit"><b>Stat Pop Board</b></a>'
 
-(OUT / "index.html").write_text(head("Stat Pop Board", "Second-monitor board that pulls pop-worthy stats from the StatBroadcast page you have open.") + f"""
+write(OUT / "index.html", head("Stat Pop Board", "Second-monitor board that pulls pop-worthy stats from the StatBroadcast page you have open.") + f"""
 <script>window.__spbNoReader = true;</script>
 <script src="/spb.js?v={VERSION}"></script>
 </head>
@@ -159,7 +166,7 @@ BRAND = '<a class="brand" href="/" style="text-decoration:none;color:inherit"><b
 </html>
 """)
 
-(OUT / "setup.html").write_text(head("Pop Board Setup", "How to start the Stat Pop Board reader on a StatBroadcast page.") + f"""
+write(OUT / "setup.html", head("Pop Board Setup", "How to start the Stat Pop Board reader on a StatBroadcast page.") + f"""
 </head>
 <body>
 <main class="page">
@@ -236,7 +243,7 @@ BRAND = '<a class="brand" href="/" style="text-decoration:none;color:inherit"><b
 </html>
 """)
 
-(OUT / "replay.html").write_text(head("Pop Board Replay", "The Stat Pop Board stepping through MSU vs Idaho (Oct 1, 2026) rally by rally.") + f"""
+write(OUT / "replay.html", head("Pop Board Replay", "The Stat Pop Board stepping through MSU vs Idaho (Oct 1, 2026) rally by rally.") + f"""
 <script>window.__spbNoReader = true;</script>
 <script src="/spb.js?v={VERSION}"></script>
 </head>
@@ -270,7 +277,7 @@ BRAND = '<a class="brand" href="/" style="text-decoration:none;color:inherit"><b
 </html>
 """)
 
-(OUT / "practice.html").write_text(head("UI 0, MSU 0 - SET 1", "Practice stand-in for a StatBroadcast page.", board_css=False) + f"""
+write(OUT / "practice.html", head("UI 0, MSU 0 - SET 1", "Practice stand-in for a StatBroadcast page.", board_css=False) + f"""
 <style>
   body {{ margin: 0; background: #f4f5f7; color: #111; font: 13px/1.35 Arial, Helvetica, sans-serif; }}
   .banner {{ background: #10161c; color: #edf1f4; padding: 10px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font: 500 14px/1.3 system-ui, "Segoe UI", sans-serif; }}
@@ -357,7 +364,7 @@ if args.check:
     print(f"site/ and vercel.json are up to date (v{VERSION}).")
     sys.exit(0)
 
-(ROOT / "vercel.json").write_text(VERCEL, encoding="utf-8")
+write(ROOT / "vercel.json", VERCEL)
 total = 0
 for f in sorted(OUT.rglob("*")):
     if f.is_file():
