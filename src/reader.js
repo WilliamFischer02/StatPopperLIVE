@@ -41,12 +41,18 @@ function startReader(SPB) {
     };
   }
 
+  // Column abbreviations. The live StatBroadcast volleyball box (first seen 2026-10-17,
+  // SUU at MSU, event 670274) uses S # PLAYER K E TA HIT% AS SA DG BL -- so AS, DG and BL
+  // are the real page's spellings for assists, digs and blocks. Without them looksVolleyball
+  // counted only one extra column and rejected both box-score tables.
+  // BL is a combined block count; it maps to bs so tb comes out right. The SOLO/AST split
+  // on a card is therefore not meaningful on pages that use BL.
   const HMAP = {
     '#': 'uni', 'NO': 'uni', 'NO.': 'uni', 'NUM': 'uni',
     'PLAYER': 'name', 'NAME': 'name', 'ATHLETE': 'name',
     'SP': 'sp', 'S': 'sp', 'K': 'k', 'KILLS': 'k', 'E': 'e', 'TA': 'ta', 'TOT': 'ta', 'ATT': 'ta',
-    'PCT': 'pct', 'PCT.': 'pct', 'HIT%': 'pct', 'A': 'a', 'AST': 'a', 'ASST': 'a',
-    'SA': 'sa', 'SE': 'se', 'RE': 're', 'DIG': 'dig', 'DIGS': 'dig', 'BS': 'bs', 'BA': 'ba',
+    'PCT': 'pct', 'PCT.': 'pct', 'HIT%': 'pct', 'A': 'a', 'AS': 'a', 'AST': 'a', 'ASST': 'a',
+    'SA': 'sa', 'SE': 'se', 'RE': 're', 'DIG': 'dig', 'DG': 'dig', 'DIGS': 'dig', 'BS': 'bs', 'BA': 'ba', 'BL': 'bs',
     'BE': 'be', 'BHE': 'bhe', 'PTS': 'pts', 'DHB': 'dhb',
   };
   const cellText = (c) => (c.innerText || c.textContent || '').replace(/\s+/g, ' ').trim();

@@ -1,11 +1,11 @@
-/* Stat Pop Board 0.3.0: reads only the page you have open and shares it with the board window on this computer. */
+/* Stat Pop Board 0.3.1: reads only the page you have open and shares it with the board window on this computer. */
 (function () {
 'use strict';
 if (window.SPB && window.SPB.version) { if (!window.__spbNoReader && window.SPB.show) window.SPB.show(); return; }
 var cs = document.currentScript;
-var SPB = { version: "0.3.0" };
+var SPB = { version: "0.3.1" };
 SPB.origin = window.__spbOrigin || (cs && cs.src ? new URL(cs.src, location.href).origin : null) || "https://stat-pop-board.vercel.app";
-SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.3.0' : null;
+SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.3.1' : null;
 SPB.fontsHref = "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap";
 SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos":"OH"},{"uni":"5","first":"Keely","last":"Culler","pos":"OH"},{"uni":"6","first":"Teagan","last":"Jaynes","pos":"S"},{"uni":"7","first":"Lauren","last":"Schloe","pos":"MB/OPP"},{"uni":"9","first":"Maggie","last":"Rhew","pos":"S/DS"},{"uni":"11","first":"Elli","last":"Esko","pos":"OH"},{"uni":"12","first":"Afton","last":"Thomsen","pos":"L/DS"},{"uni":"13","first":"Jolene","last":"Green Ewen","pos":"MB"},{"uni":"14","first":"Taylor","last":"McDonald","pos":"MH/OPP"},{"uni":"15","first":"Teya","last":"Yeomans","pos":"OH"},{"uni":"16","first":"Haven","last":"Rich","pos":"L/DS"},{"uni":"17","first":"Alice","last":"Steman","pos":"MB"},{"uni":"18","first":"Karli","last":"Heidemann","pos":"OH"},{"uni":"22","first":"Joelie","last":"Spelts","pos":"MB"},{"uni":"23","first":"Elli","last":"Tufto","pos":"OH"},{"uni":"45","first":"Nicolette","last":"Noble","pos":"L/DS"}] };
 /*
@@ -999,12 +999,18 @@ function startReader(SPB) {
     };
   }
 
+  // Column abbreviations. The live StatBroadcast volleyball box (first seen 2026-10-17,
+  // SUU at MSU, event 670274) uses S # PLAYER K E TA HIT% AS SA DG BL -- so AS, DG and BL
+  // are the real page's spellings for assists, digs and blocks. Without them looksVolleyball
+  // counted only one extra column and rejected both box-score tables.
+  // BL is a combined block count; it maps to bs so tb comes out right. The SOLO/AST split
+  // on a card is therefore not meaningful on pages that use BL.
   const HMAP = {
     '#': 'uni', 'NO': 'uni', 'NO.': 'uni', 'NUM': 'uni',
     'PLAYER': 'name', 'NAME': 'name', 'ATHLETE': 'name',
     'SP': 'sp', 'S': 'sp', 'K': 'k', 'KILLS': 'k', 'E': 'e', 'TA': 'ta', 'TOT': 'ta', 'ATT': 'ta',
-    'PCT': 'pct', 'PCT.': 'pct', 'HIT%': 'pct', 'A': 'a', 'AST': 'a', 'ASST': 'a',
-    'SA': 'sa', 'SE': 'se', 'RE': 're', 'DIG': 'dig', 'DIGS': 'dig', 'BS': 'bs', 'BA': 'ba',
+    'PCT': 'pct', 'PCT.': 'pct', 'HIT%': 'pct', 'A': 'a', 'AS': 'a', 'AST': 'a', 'ASST': 'a',
+    'SA': 'sa', 'SE': 'se', 'RE': 're', 'DIG': 'dig', 'DG': 'dig', 'DIGS': 'dig', 'BS': 'bs', 'BA': 'ba', 'BL': 'bs',
     'BE': 'be', 'BHE': 'bhe', 'PTS': 'pts', 'DHB': 'dhb',
   };
   const cellText = (c) => (c.innerText || c.textContent || '').replace(/\s+/g, ' ').trim();
