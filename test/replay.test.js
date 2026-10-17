@@ -56,12 +56,21 @@ for (let n = 0; n <= rp.total; n++) {
 
   const snap = rp.snapshot(n);
   for (const side of ['home', 'away']) {
-    const withStats = snap.teams[side].players.filter((p) => ['k', 'a', 'sa', 'dig', 'bs', 'ba'].some((f) => +p[f] > 0)).length;
     const cards = view.playerCards[side];
-    // Each side always fills its 3 player cards, as long as 3 players have any stat.
-    assert.strictEqual(cards.length, Math.min(3, withStats), `rally ${n} ${side}: ${cards.length} player cards, ${withStats} players with stats`);
-    // Each card offers 2 options when the player has 2 different stats to show.
-    for (const c of cards) assert.ok(c.pops.length >= 1 && c.pops.length <= 3, `rally ${n} ${c.last}: ${c.pops.length} options`);
+    if (snap.status === 'pre') {
+      // Before first serve the roster fills the slots, greyed, with no options yet, and both team lines show at zero.
+      const roster = snap.teams[side].players.length;
+      assert.strictEqual(cards.length, Math.min(3, roster), `rally ${n} ${side}: ${cards.length} preview cards, ${roster} on the roster`);
+      for (const c of cards) assert.ok(c.dim && c.pops.length === 0, `rally ${n} ${c.last}: preview card is greyed with no options`);
+      const tcs = view.teamCards[side];
+      assert.ok(tcs.length === 2 && tcs.every((c) => c.dim), `rally ${n} ${side}: ${tcs.length} greyed team cards before first serve`);
+    } else {
+      const withStats = snap.teams[side].players.filter((p) => ['k', 'a', 'sa', 'dig', 'bs', 'ba'].some((f) => +p[f] > 0)).length;
+      // Each side always fills its 3 player cards, as long as 3 players have any stat.
+      assert.strictEqual(cards.length, Math.min(3, withStats), `rally ${n} ${side}: ${cards.length} player cards, ${withStats} players with stats`);
+      // Each card offers 2 options when the player has 2 different stats to show.
+      for (const c of cards) assert.ok(c.pops.length >= 1 && c.pops.length <= 3, `rally ${n} ${c.last}: ${c.pops.length} options`);
+    }
     // Greyed cards carry no live or pinned reason.
     for (const c of cards) if (c.dim) assert.ok(!c.held && !(c.tag && c.tag.kind === 'live'), `rally ${n} ${c.last}: greyed card is live or pinned`);
     // Team cards: at least 1 once the team has a kill, and 2 once the match is a few rallies old.

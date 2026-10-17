@@ -431,6 +431,13 @@
       fill('ace', T.sa > 0, T.sa / (1.5 * e), pl(T.sa, 'Ace'), `${oc} ${O.sa}`);
       if (S) fill('sethit', S.ta >= 8, (S.pct - 0.1) / 0.2, `Set ${s.set} Hit% ${fmtPct(S.pct, true)}`, `${oc} ${fmtPct(So.pct, true)} this set`);
 
+      // Pre-match preview: no team has a stat yet, so none of the fillers above qualify. Show the two
+      // everyday lines at their zero values, greyed, so both team columns have cards before first serve.
+      if (s.status === 'pre' && !c.length) {
+        const z = (x) => fmtPct(x.ta > 0 ? x.pct : 0, true);
+        c.push({ id: 'hit', dim: true, score: 0.06, big: `Team Hit% ${z(T)}`, sub: `${oc} ${z(O)}` });
+        c.push({ id: 'kills', dim: true, score: 0.05, big: pl(T.k, 'Kill'), sub: `${oc} ${O.k}` });
+      }
       const prev = mem.prevTeam[side];
       for (const x of c) if (prev.includes(x.id)) x.score += 0.2;
       c.sort((a, b) => b.score - a.score);
@@ -548,6 +555,16 @@
           let idx = -1;
           for (let i = chosen.length - 1; i >= 0; i--) if (!chosen[i].pinned && !chosen[i].hold) { idx = i; break; }
           if (idx >= 0) chosen[idx] = starredPool[0];
+        }
+      }
+      // Pre-match preview (status 'pre', the page's SET 0): nobody has a stat yet, so the rules above
+      // leave the side empty. Fill its slots with the roster in page order, greyed, so the layout can be
+      // checked before first serve. Once the set starts this never runs: cards then come only from stats.
+      if (s.status === 'pre' && chosen.length < cfg.maxCards) {
+        const have = new Set(chosen.map((c) => c.key));
+        for (const c of pool) {
+          if (chosen.length >= cfg.maxCards) break;
+          if (!have.has(c.key)) { chosen.push(c); have.add(c.key); }
         }
       }
       const chosenKeys = new Set(chosen.map((c) => c.key));
