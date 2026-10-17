@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-- The site is live at https://stat-pop-board.vercel.app. v0.2.0 went up at about 11:15 MT, v0.2.1 (Tampermonkey hardening) that afternoon, and v0.3.0 (Pin button, always-full board with greyed filler) at about 3:30 pm. Each passed the full end-to-end suite.
+- The site is live at https://stat-pop-board.vercel.app. v0.2.0 went up at about 11:15 MT, v0.2.1 (Tampermonkey hardening) that afternoon, and v0.3.0 (Pin button, always-full board with greyed filler) at about 3:00 pm. Each passed the full end-to-end suite.
 - Source of truth: the GitHub repo `WilliamFischer02/StatPopperLIVE`. The full decision log and research are in `docs/CONTEXT.md`.
 - **The main unknown:** the reader has never seen a real StatBroadcast page. Its parsing is based on StatCrew conventions and a mock page. The first real match is the calibration run.
 - The site was first deployed through the Vercel API, before this repo existed. Once the repo is connected to the Vercel project, Git pushes take over (see "Deployment notes").
@@ -44,7 +44,8 @@
 
 ## Deployment notes
 
-- **Current production deployment:** `dpl_EQ1uGfryhPzMp8xjY3FVPtCkU4ix` (v0.2.1, built from this repo's `main` at `d177ba7`), aliased to `stat-pop-board.vercel.app`.
+- **Current production deployment:** `dpl_4apAsiymyoBRyuBsxA9sD2phgjjA` (v0.3.0, built from `main` at `d143a8d`, PR #1), aliased to `stat-pop-board.vercel.app`. Deployed about 3:00 pm MT Oct 17; all 13 live files byte-identical to the build; live e2e 26/26. Previous: `dpl_EQ1uGfryhPzMp8xjY3FVPtCkU4ix` (v0.2.1), a one-click rollback candidate.
+- **How deploys work now:** push a branch, then create the deployment through the Vercel API with `gitSource` (see `CLAUDE.md` → Deploying). Preview deployments add Vercel's toolbar script to `index.html`, so only that file differs from the build there.
 - **Push-to-deploy is not on yet.** The Vercel project isn't linked to this repo; William needs to connect it in the project's Git settings. Check with him before assuming a push went live, and verify with the live e2e test.
 - **How it was deployed.** This first deploy went through the Vercel API with `spb.js` uploaded in three parts (`parts/spb-1..3.js`), which a one-off build command joined together. As a result, the project's saved settings still contain that build command and a `dist` output directory. The repo's `vercel.json` overrides both: no install, no build, output `site`. You can clear the overrides in the Vercel project settings once Git is connected, but they're harmless.
 - **After connecting the repo.** Check that the first Git deployment serves byte-identical files by running `E2E_BASE=<deployment URL> python3 test/e2e_site.py`. The repo's `site/` was verified identical to production on Oct 17.
