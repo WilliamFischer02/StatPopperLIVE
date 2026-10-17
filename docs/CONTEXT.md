@@ -328,7 +328,8 @@ Play capture can only be tested during a live match.
 | Oct 17, about 11:40 | Repo zip: unzip, then `--check`, Node replay, e2e | All passed |
 | Oct 17, about 14:40 | v0.2.1 e2e (22 checks), local | All passed |
 | Oct 17, about 14:55 | v0.2.1 deployed from GitHub (commit `d177ba7`, deployment `dpl_EQ1uGfryhPzMp8xjY3FVPtCkU4ix`): all 13 live files byte-identical to the repo build; live e2e, 23 checks including a Tampermonkey-style start linking to the live board | All passed |
-| Oct 17, about 3:20 | v0.3.0 local: replay test with board-rule assertions; e2e 25 checks on Windows | All passed |
+| Oct 17, about 2:50 | v0.3.0 local: replay test with board-rule assertions; e2e 25 checks on Windows; CI on Linux | All passed |
+| Oct 17, about 3:00 | v0.3.0 preview (`dpl_AfCwpWwEcfwnDy4BgvBeBTQ7DMZd`) e2e 25 checks; production (`dpl_4apAsiymyoBRyuBsxA9sD2phgjjA`, `main` `d143a8d`): 13 live files byte-identical, live e2e 26 checks | All passed |
 | Never | Reader on a real StatBroadcast page | **Not yet.** Do the pre-game test in §7 |
 
 ---
