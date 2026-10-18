@@ -339,6 +339,7 @@ Play capture can only be tested during a live match.
 | Oct 17, about 3:00 | v0.3.0 preview (`dpl_AfCwpWwEcfwnDy4BgvBeBTQ7DMZd`) e2e 25 checks; production (`dpl_4apAsiymyoBRyuBsxA9sD2phgjjA`, `main` `d143a8d`): 13 live files byte-identical, live e2e 26 checks | All passed |
 | Oct 17, 7:00 pm | Reader on the real StatBroadcast page, SUU at MSU (670274), the whole match | Worked after v0.3.1. Set and match rows appeared as player cards (fixed in v0.3.5). No Copy for Claude JSON saved yet |
 | Oct 17, about 11:30 pm | v0.3.5 local: mock with the live headers, TEAM row and team-by-set tables. Before the fix it reproduced the bug (cards "1", "2", "3", "Match"; dock 17 + 15 players). After the fix: 14 + 13 players; replay test and e2e (26 checks) | All passed |
+| Oct 17, about 11:45 pm | v0.3.5 preview (`dpl_8ijTV88YERFShgkXjRnNihrDjYXn`) e2e 26 checks; production (`dpl_CfWWf8F8ZVV6cXacwjR16zcYVuxf`, `main` `260f12c`): live files identical to the build, live e2e 27 checks | All passed |
 
 ---
 
