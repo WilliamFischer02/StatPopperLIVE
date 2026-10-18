@@ -54,6 +54,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .eyebrow .swatch { width: 10px; height: 10px; border-radius: 2px; }
 .side-home .swatch, .swatch.home { background: var(--home); }
 .side-away .swatch, .swatch.away { background: var(--away); }
+/* A swatch is a button when the board can set team colours; the picker opens on click. */
+.swatch.pick { border: 0; padding: 0; margin: 0; width: 14px; height: 14px; border-radius: 3px; cursor: pointer; }
+.swatch.pick:hover, .swatch.pick:focus-visible { box-shadow: 0 0 0 2px var(--ink-3); outline: none; }
+.colorpick { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 
 /* ---------- game panel */
 .scoreline { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; }
@@ -122,7 +126,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 @keyframes arrive { from { transform: translateY(-4px); opacity: .35; } to { transform: none; opacity: 1; } }
 .phead { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; }
 .jersey { width: 46px; height: 46px; border-radius: 6px; display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; font-size: 27px; color: #0c1014; font-variant-numeric: tabular-nums; }
-.side-home .jersey { background: var(--home); } .side-away .jersey { background: var(--away); }
+.side-home .jersey { background: var(--home); color: var(--home-ink, #0c1014); } .side-away .jersey { background: var(--away); color: var(--away-ink, #0c1014); }
 .who { min-width: 0; }
 .last { font-family: var(--font-display); font-weight: 700; font-size: 25px; line-height: 1; text-transform: uppercase; letter-spacing: .02em; overflow-wrap: anywhere; }
 .meta { margin-top: 2px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13px; color: var(--ink-2); }

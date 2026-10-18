@@ -9,7 +9,7 @@
  *   - new play-by-play / console sentences that name a rostered player
  */
 function startReader(SPB) {
-  const PE = SPB.PopEngine, BV = SPB.BoardView;
+  const PE = SPB.PopEngine, BV = SPB.BoardView, IP = SPB.ImpactPicker;
   const VERSION = SPB.version;
   const INSTANCE = Math.random().toString(36).slice(2, 10);
   const BOARD_ORIGIN = SPB.origin;
@@ -343,7 +343,9 @@ function startReader(SPB) {
       hold: (k) => { eng.toggleHold(k); board.render(eng.view()); },
       hide: (k) => { eng.hide(k); saveHidden(); board.render(eng.view()); },
       unhide: (k) => { eng.unhide(k); saveHidden(); board.render(eng.view()); },
+      color: (side, hex) => { const t = teamAt(side); if (!t) return; store.set(colorKey(t), hex); applyColors(); send(true); },
     });
+    applyColors();
   }
   function setOpen(open) {
     if (open) buildOverlay();
@@ -393,12 +395,33 @@ function startReader(SPB) {
     if (d.type === 'hello' || d.type === 'ack') {
       const was = linked();
       boardWin = e.source; lastAckAt = Date.now(); bridgeNote = '';
+      if (d.colors) adoptColors(d.colors);
       if (d.type === 'hello') send(true);
       if (!was) updateDock();
     }
   });
 
   let state = { ok: false, kind: 'wait', error: 'Starting…', raw: null };
+  // Team colours, keyed by team so they match the board window whichever way either tab is swapped.
+  // They ride on the state message (to the board) and the ack (from it); each side keeps its own copy.
+  const teamAt = (side) => state.raw && state.raw.teams[swapped ? (side === 'home' ? 'away' : 'home') : side];
+  const colorKey = (t) => 'color:' + IP.teamKey(t);
+  function applyColors() {
+    if (!board) return;
+    const h = teamAt('home'), a = teamAt('away');
+    board.setColors(h && a ? { home: store.get(colorKey(h), null), away: store.get(colorKey(a), null) } : null);
+  }
+  function teamColors() {
+    const out = {};
+    if (!state.raw) return out;
+    for (const t of [state.raw.teams.home, state.raw.teams.away]) { const v = store.get(colorKey(t), null); if (v) out[IP.teamKey(t)] = v; }
+    return out;
+  }
+  function adoptColors(c) {
+    // Store what the other tab knows, then apply regardless: a colour can be stored but not yet painted.
+    for (const tk in c || {}) if (/^#[0-9a-f]{6}$/i.test(c[tk]) && store.get('color:' + tk, null) !== c[tk]) store.set('color:' + tk, c[tk]);
+    applyColors();
+  }
   function diagSummary() {
     return { version: VERSION, eventId, url: location.href.split('#')[0], title: diag.title, parsedTitle: diag.parsedTitle,
       names: diag.names, tables: diag.tables, error: state.error, linesCaptured: lineSeq };
@@ -409,7 +432,7 @@ function startReader(SPB) {
     const h = JSON.stringify([state.raw, lineSeq, state.error]);
     if (!force && h === lastSentHash && Date.now() - lastSentAt < 2000) return;
     const msg = { spb: 1, type: 'state', v: VERSION, inst: INSTANCE, eventId, seq: ++sendSeq, sentAt: Date.now(),
-      ok: state.ok, kind: state.kind, error: state.error, snap: state.raw, lines: lineLog.slice(-12), diag: diagSummary() };
+      ok: state.ok, kind: state.kind, error: state.error, snap: state.raw, lines: lineLog.slice(-12), diag: diagSummary(), colors: teamColors() };
     try { t.postMessage(msg, BOARD_ORIGIN); lastSentAt = Date.now(); lastSentHash = h; } catch (e) { bridgeNote = 'could not reach the board: ' + e.message; }
   }
 
@@ -447,7 +470,7 @@ function startReader(SPB) {
       if (force || hash !== lastHash || fresh.length) {
         lastHash = hash; lastChange = Date.now();
         inTabView = eng.update(PE.swapSides(snap, swapped), fresh.map((l) => l.text).slice(-3));
-        if (overlayOpen()) board.render(inTabView);
+        if (overlayOpen()) { applyColors(); board.render(inTabView); }
       } else if (eng.expireHolds()) {
         inTabView = eng.view();
         if (overlayOpen()) board.render(inTabView);

@@ -26,6 +26,7 @@
     hold: (k) => { eng.toggleHold(k); rerender(); },
     hide: (k) => { eng.hide(k); store.set('hidden:' + eventId, eng.hiddenKeys); rerender(); },
     unhide: (k) => { eng.unhide(k); store.set('hidden:' + eventId, eng.hiddenKeys); rerender(); },
+    color: (side, hex) => { const s = oriented(); if (!s) return; store.set(colorKey(s.teams[side]), hex); applyColors(); },
     star: (k) => {
       const [side, uni] = k.split(':');
       const snap = oriented();
@@ -39,9 +40,28 @@
     if (!s) return;
     eng.setStars({ home: stars.get(IP.teamKey(s.teams.home)), away: stars.get(IP.teamKey(s.teams.away)) });
   }
+  // Team colours, remembered per team (not per side) so they survive Swap sides and the next match,
+  // and shared with the stats tab's in-tab board through the ack and state messages.
+  const colorKey = (t) => 'color:' + IP.teamKey(t);
+  function applyColors() {
+    const s = oriented();
+    board.setColors(s ? { home: store.get(colorKey(s.teams.home), null), away: store.get(colorKey(s.teams.away), null) } : null);
+  }
+  function teamColors() {
+    const s = oriented(), out = {};
+    if (!s) return out;
+    for (const side of ['home', 'away']) { const v = store.get(colorKey(s.teams[side]), null); if (v) out[IP.teamKey(s.teams[side])] = v; }
+    return out;
+  }
+  function adoptColors(c) {
+    // Store what the other tab knows, then apply regardless: a colour can be stored but not yet painted.
+    for (const tk in c || {}) if (/^#[0-9a-f]{6}$/i.test(c[tk]) && store.get('color:' + tk, null) !== c[tk]) store.set('color:' + tk, c[tk]);
+    applyColors();
+  }
   function rerender() {
     if (!lastGood) { renderPicker(); return; }
     view = eng.view();
+    applyColors();
     board.render(view);
     renderPicker();
   }
@@ -83,7 +103,7 @@
     if (!d || d.spb !== 1 || !okOrigin(e.origin)) return;
     if (d.type === 'reader-hello') { try { e.source.postMessage({ spb: 1, type: 'hello' }, e.origin); } catch (err) { /* tab went away */ } return; }
     if (d.type !== 'state') return;
-    try { e.source.postMessage({ spb: 1, type: 'ack', seq: d.seq }, e.origin); } catch (err) { /* tab went away */ }
+    try { e.source.postMessage({ spb: 1, type: 'ack', seq: d.seq, colors: teamColors() }, e.origin); } catch (err) { /* tab went away */ }
     handleState(d);
   });
   function hello() {
@@ -96,6 +116,7 @@
 
   function handleState(d) {
     msgs++; lastAt = Date.now(); last = d;
+    if (d.colors) adoptColors(d.colors);
     if (d.eventId !== eventId) {
       eventId = d.eventId; inst = null; lastGood = null; resetEngine();
     }
@@ -115,6 +136,7 @@
         lastHash = h; lastChangeAt = Date.now();
         applyStars();
         view = eng.update(PE.swapSides(d.snap, swapped), lines.map((l) => l.text).slice(-3));
+        applyColors();
         board.render(view);
         if (firstGood) { remember(d); renderPicker(); }
         else if (pickerOpen) renderPicker();
@@ -187,7 +209,7 @@
   $('swap').addEventListener('click', () => {
     swapped = !swapped; store.set('swap', swapped);
     resetEngine();
-    if (lastGood) { applyStars(); view = eng.update(PE.swapSides(lastGood, swapped), []); board.render(view); }
+    if (lastGood) { applyStars(); view = eng.update(PE.swapSides(lastGood, swapped), []); applyColors(); board.render(view); }
     renderPicker(); paint();
   });
   $('fs').addEventListener('click', () => {

@@ -74,8 +74,8 @@ The board pings `hello` every 3 s whenever it hasn't had state for 6 s. That pin
 
 **Message protocol.** Every message carries `spb: 1`.
 
-- Reader to board: `{type:'state', v, inst, eventId, seq, sentAt, ok, kind, error, snap, lines: last 12 {id,text,at}, diag}`. It is sent on change, or at least every 2 s.
-- Board to reader: `{type:'ack', seq}` for every state, plus `{type:'hello'}`.
+- Reader to board: `{type:'state', v, inst, eventId, seq, sentAt, ok, kind, error, snap, lines: last 12 {id,text,at}, diag, colors}`. It is sent on change, or at least every 2 s. `colors` is `{teamKey: '#rrggbb'}` for the two teams, when set.
+- Board to reader: `{type:'ack', seq, colors}` for every state, plus `{type:'hello'}`. Each side adopts a `colors` entry it doesn't have yet, so a colour picked in either tab reaches the other.
 - The reader accepts messages only from `SPB.origin`. The board accepts its own origin or `https://*.statbroadcast.com`.
 - `eventId` is the URL `id` param, `practice`, or `page`. A change in `eventId` resets the engine. A new `inst` (the reader was reloaded) marks only its newest line as live.
 
@@ -95,6 +95,7 @@ P = { uni, first, last, k, e, ta, a, sa, se, re, dig, bs, ba, be }
 - **Board makeup (v0.3.0).** Each side always fills 3 player cards (as long as 3 players have a stat) and 2 team cards (1 in the first few rallies). Order: Pin-held cards, then notable or live cards by impact, then the most active remaining players as greyed filler (`dim`). A card that just arrived gets a +1.5 stickiness bonus for 4 rallies, so cards don't flicker. Cards keep their slots between updates.
 - **Pin (William's button, v0.3.0).** Keeps a player's card on the board, still updating, for 10 minutes or until he clicks Unpin. Engine API: `toggleHold(key)`, `expireHolds()`; state is `user.held`, separate from `mem.pins` (the last-play pin). Max 3 per side; a 4th releases that side's oldest. Pass and Hide release the pin. The board checks for expiry every second.
 - **Impact stars.** A starred player always gets a card on their side.
+- **Team colours (v0.3.3).** The swatch beside a team name opens the browser colour picker. The colour is stored per team (`spb:color:<teamKey>`), not per side, so it survives Swap sides and comes back the next time that team plays. Jersey ink flips to white on a dark colour.
 - **Pass and Hide.** Pass skips a player for 10 rallies. Hide removes them until they're unhidden.
 - **Team cards.** Notable: scoring runs, set hit %, team hit %, kills, blocks, aces, digs, service errors, and a set summary. Filler (greyed, always ranked below notable): team hit %, kills, blocks, digs, aces and set hit %, whenever the team has that stat.
 - **Alerts.** Set point, match point, timeout, challenge, penalty, sub, set won and final.

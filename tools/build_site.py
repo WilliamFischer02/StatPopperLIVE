@@ -21,7 +21,7 @@ args = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 args.add_argument("--check", action="store_true", help="build to a temp folder and compare with site/")
 args = args.parse_args()
 OUT = Path(tempfile.mkdtemp(prefix="spb-site-")) if args.check else SITE
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 # Where the live site is served. The reader falls back to this when nothing else tells it where the board is
 # (Tampermonkey's @require gives it no script URL), and the one-click Tampermonkey script points here.
 PROD_ORIGIN = "https://stat-pop-board.vercel.app"

@@ -1,11 +1,11 @@
-/* Stat Pop Board 0.3.2: reads only the page you have open and shares it with the board window on this computer. */
+/* Stat Pop Board 0.3.3: reads only the page you have open and shares it with the board window on this computer. */
 (function () {
 'use strict';
 if (window.SPB && window.SPB.version) { if (!window.__spbNoReader && window.SPB.show) window.SPB.show(); return; }
 var cs = document.currentScript;
-var SPB = { version: "0.3.2" };
+var SPB = { version: "0.3.3" };
 SPB.origin = window.__spbOrigin || (cs && cs.src ? new URL(cs.src, location.href).origin : null) || "https://stat-pop-board.vercel.app";
-SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.3.2' : null;
+SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.3.3' : null;
 SPB.fontsHref = "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap";
 SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos":"OH"},{"uni":"5","first":"Keely","last":"Culler","pos":"OH"},{"uni":"6","first":"Teagan","last":"Jaynes","pos":"S"},{"uni":"7","first":"Lauren","last":"Schloe","pos":"MB/OPP"},{"uni":"9","first":"Maggie","last":"Rhew","pos":"S/DS"},{"uni":"11","first":"Elli","last":"Esko","pos":"OH"},{"uni":"12","first":"Afton","last":"Thomsen","pos":"L/DS"},{"uni":"13","first":"Jolene","last":"Green Ewen","pos":"MB"},{"uni":"14","first":"Taylor","last":"McDonald","pos":"MH/OPP"},{"uni":"15","first":"Teya","last":"Yeomans","pos":"OH"},{"uni":"16","first":"Haven","last":"Rich","pos":"L/DS"},{"uni":"17","first":"Alice","last":"Steman","pos":"MB"},{"uni":"18","first":"Karli","last":"Heidemann","pos":"OH"},{"uni":"22","first":"Joelie","last":"Spelts","pos":"MB"},{"uni":"23","first":"Elli","last":"Tufto","pos":"OH"},{"uni":"45","first":"Nicolette","last":"Noble","pos":"L/DS"}] };
 /*
@@ -748,6 +748,16 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  // Jersey numbers sit on the team colour: dark ink on a light colour, white on a dark one.
+  function inkFor(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+    if (!m) return '#0c1014';
+    const n = parseInt(m[1], 16);
+    const ch = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    const lum = 0.2126 * ch(n >> 16) + 0.7152 * ch((n >> 8) & 255) + 0.0722 * ch(n & 255);
+    return lum > 0.179 ? '#0c1014' : '#ffffff';
+  }
+
   function mountBoard(host, handlers) {
     handlers = handlers || {};
     let tab = 'plays';
@@ -759,15 +769,38 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         <section class="q q-home side-home" aria-label="Home players"></section>
         <section class="q q-away side-away" aria-label="Away players"></section>
       </div>
-      <div class="foot"></div>`;
+      <div class="foot"></div>
+      <input type="color" class="colorpick" tabindex="-1" aria-hidden="true">`;
     const $ = (sel) => host.querySelector(sel);
     const regions = { game: $('.q-game'), team: $('.q-team'), home: $('.q-home'), away: $('.q-away'), foot: $('.foot') };
+    // Team colours. A swatch is a button when the host can set colours; clicking it opens the browser's
+    // colour picker. The input lives outside the regions, so a re-render never closes the picker mid-choice.
+    const boardEl = $('.board'), colorInput = $('.colorpick');
+    let colors = { home: null, away: null }, pickSide = null;
+    const swatch = (side, code) => (handlers.color
+      ? `<button type="button" class="swatch pick ${side}" data-act="color" data-side="${side}" title="Set the ${esc(code)} colour" aria-label="Set the ${esc(code)} team colour"></button>`
+      : `<span class="swatch ${side}"></span>`);
+    colorInput.addEventListener('input', () => { if (pickSide && handlers.color) handlers.color(pickSide, colorInput.value); });
+    function setColors(c) {
+      colors = { home: (c && c.home) || null, away: (c && c.away) || null };
+      for (const side of ['home', 'away']) {
+        const v = colors[side];
+        if (v) { boardEl.style.setProperty('--' + side, v); boardEl.style.setProperty('--' + side + '-ink', inkFor(v)); }
+        else { boardEl.style.removeProperty('--' + side); boardEl.style.removeProperty('--' + side + '-ink'); }
+      }
+    }
 
     host.addEventListener('click', (ev) => {
       const b = ev.target.closest('button[data-act]');
       if (!b) return;
       const act = b.dataset.act;
       if (act === 'tab') { tab = b.dataset.tab; if (lastView) drawGame(lastView); return; }
+      if (act === 'color') {
+        pickSide = b.dataset.side;
+        colorInput.value = colors[pickSide] || getComputedStyle(boardEl).getPropertyValue('--' + pickSide).trim() || '#888888';
+        colorInput.click();
+        return;
+      }
       if (handlers[act]) handlers[act](b.dataset.key);
     });
 
@@ -808,7 +841,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       const cards = v.playerCards[side];
       const empty = cards.length < 3
         ? `<div class="empty">${cards.length ? 'No other' : 'No'} ${esc(t.code)} player has a stat yet.</div>` : '';
-      regions[side].innerHTML = `<div class="eyebrow"><span class="swatch"></span>${esc(t.name || t.code)} players</div>
+      regions[side].innerHTML = `<div class="eyebrow">${swatch(side, t.code)}${esc(t.name || t.code)} players</div>
         <div class="pstack">${cards.map(playerCard).join('')}${empty}</div>`;
     }
 
@@ -819,7 +852,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         const body = cards.length
           ? cards.map((c) => `<div class="tcard${c.live ? ' is-live' : ''}${c.dim ? ' is-dim' : ''}"><div class="big">${esc(c.big)}</div><div class="sub">${c.live ? '<span class="livedot">Live</span> ' : ''}${esc(c.sub || '')}</div></div>`).join('')
           : `<div class="empty">No ${esc(t.code)} team stats yet.</div>`;
-        return `<div class="tcol side-${side}"><div class="eyebrow"><span class="swatch"></span>${esc(t.code)}</div>${body}</div>`;
+        return `<div class="tcol side-${side}"><div class="eyebrow">${swatch(side, t.code)}${esc(t.code)}</div>${body}</div>`;
       };
       regions.team.innerHTML = `<div class="eyebrow">Team pops</div><div class="tcols">${col('home')}${col('away')}</div>`;
     }
@@ -827,14 +860,14 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     function court(v, side) {
       const r = v.rotation[side];
       const t = v.teams[side];
-      if (!r.court) return `<div class="court"><h4><span class="swatch ${side}"></span>${esc(t.code)}</h4><p class="note">Fills in once ${esc(t.code)} serves.</p></div>`;
+      if (!r.court) return `<div class="court"><h4>${swatch(side, t.code)}${esc(t.code)}</h4><p class="note">Fills in once ${esc(t.code)} serves.</p></div>`;
       const at = (pos) => r.court.find((x) => x.pos === pos);
       const cell = (pos) => {
         const x = at(pos);
         const srv = pos === 1 && r.serving;
         return `<div class="cell${srv ? ' srv' : ''}${x.player ? '' : ' unknown'}"><div class="pos">P${pos}${srv ? ' · serving' : ''}</div><div class="nm">${x.player ? '#' + esc(x.player.uni) + ' ' + esc(x.player.last) : '—'}</div></div>`;
       };
-      return `<div class="court"><h4><span class="swatch ${side}"></span>${esc(t.code)}</h4>
+      return `<div class="court"><h4>${swatch(side, t.code)}${esc(t.code)}</h4>
         <div class="grid"><div class="net" aria-hidden="true"></div>${cell(4)}${cell(3)}${cell(2)}${cell(5)}${cell(6)}${cell(1)}</div></div>`;
     }
 
@@ -876,6 +909,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         if (!v) return;
         drawGame(v); drawTeam(v); drawPlayers(v, 'home'); drawPlayers(v, 'away'); drawFoot(v);
       },
+      setColors,
     };
   }
 
@@ -984,7 +1018,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
  *   - new play-by-play / console sentences that name a rostered player
  */
 function startReader(SPB) {
-  const PE = SPB.PopEngine, BV = SPB.BoardView;
+  const PE = SPB.PopEngine, BV = SPB.BoardView, IP = SPB.ImpactPicker;
   const VERSION = SPB.version;
   const INSTANCE = Math.random().toString(36).slice(2, 10);
   const BOARD_ORIGIN = SPB.origin;
@@ -1318,7 +1352,9 @@ function startReader(SPB) {
       hold: (k) => { eng.toggleHold(k); board.render(eng.view()); },
       hide: (k) => { eng.hide(k); saveHidden(); board.render(eng.view()); },
       unhide: (k) => { eng.unhide(k); saveHidden(); board.render(eng.view()); },
+      color: (side, hex) => { const t = teamAt(side); if (!t) return; store.set(colorKey(t), hex); applyColors(); send(true); },
     });
+    applyColors();
   }
   function setOpen(open) {
     if (open) buildOverlay();
@@ -1368,12 +1404,33 @@ function startReader(SPB) {
     if (d.type === 'hello' || d.type === 'ack') {
       const was = linked();
       boardWin = e.source; lastAckAt = Date.now(); bridgeNote = '';
+      if (d.colors) adoptColors(d.colors);
       if (d.type === 'hello') send(true);
       if (!was) updateDock();
     }
   });
 
   let state = { ok: false, kind: 'wait', error: 'Starting…', raw: null };
+  // Team colours, keyed by team so they match the board window whichever way either tab is swapped.
+  // They ride on the state message (to the board) and the ack (from it); each side keeps its own copy.
+  const teamAt = (side) => state.raw && state.raw.teams[swapped ? (side === 'home' ? 'away' : 'home') : side];
+  const colorKey = (t) => 'color:' + IP.teamKey(t);
+  function applyColors() {
+    if (!board) return;
+    const h = teamAt('home'), a = teamAt('away');
+    board.setColors(h && a ? { home: store.get(colorKey(h), null), away: store.get(colorKey(a), null) } : null);
+  }
+  function teamColors() {
+    const out = {};
+    if (!state.raw) return out;
+    for (const t of [state.raw.teams.home, state.raw.teams.away]) { const v = store.get(colorKey(t), null); if (v) out[IP.teamKey(t)] = v; }
+    return out;
+  }
+  function adoptColors(c) {
+    // Store what the other tab knows, then apply regardless: a colour can be stored but not yet painted.
+    for (const tk in c || {}) if (/^#[0-9a-f]{6}$/i.test(c[tk]) && store.get('color:' + tk, null) !== c[tk]) store.set('color:' + tk, c[tk]);
+    applyColors();
+  }
   function diagSummary() {
     return { version: VERSION, eventId, url: location.href.split('#')[0], title: diag.title, parsedTitle: diag.parsedTitle,
       names: diag.names, tables: diag.tables, error: state.error, linesCaptured: lineSeq };
@@ -1384,7 +1441,7 @@ function startReader(SPB) {
     const h = JSON.stringify([state.raw, lineSeq, state.error]);
     if (!force && h === lastSentHash && Date.now() - lastSentAt < 2000) return;
     const msg = { spb: 1, type: 'state', v: VERSION, inst: INSTANCE, eventId, seq: ++sendSeq, sentAt: Date.now(),
-      ok: state.ok, kind: state.kind, error: state.error, snap: state.raw, lines: lineLog.slice(-12), diag: diagSummary() };
+      ok: state.ok, kind: state.kind, error: state.error, snap: state.raw, lines: lineLog.slice(-12), diag: diagSummary(), colors: teamColors() };
     try { t.postMessage(msg, BOARD_ORIGIN); lastSentAt = Date.now(); lastSentHash = h; } catch (e) { bridgeNote = 'could not reach the board: ' + e.message; }
   }
 
@@ -1422,7 +1479,7 @@ function startReader(SPB) {
       if (force || hash !== lastHash || fresh.length) {
         lastHash = hash; lastChange = Date.now();
         inTabView = eng.update(PE.swapSides(snap, swapped), fresh.map((l) => l.text).slice(-3));
-        if (overlayOpen()) board.render(inTabView);
+        if (overlayOpen()) { applyColors(); board.render(inTabView); }
       } else if (eng.expireHolds()) {
         inTabView = eng.view();
         if (overlayOpen()) board.render(inTabView);
