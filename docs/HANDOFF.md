@@ -1,10 +1,10 @@
-# Handoff: status as of 2026-10-17 (v0.3.0)
+# Handoff: status as of 2026-10-17, after the first live match (v0.3.5)
 
 ## TL;DR
 
 - The site is live at https://stat-pop-board.vercel.app. v0.2.0 went up at about 11:15 MT, v0.2.1 (Tampermonkey hardening) that afternoon, and v0.3.0 (Pin button, always-full board with greyed filler) at about 3:00 pm. Each passed the full end-to-end suite.
 - Source of truth: the GitHub repo `WilliamFischer02/StatPopperLIVE`. The full decision log and research are in `docs/CONTEXT.md`.
-- **The main unknown:** the reader has never seen a real StatBroadcast page. Its parsing is based on StatCrew conventions and a mock page. The first real match is the calibration run.
+- **First live match done (SUU at MSU, Oct 17, event 670274).** William ran the board on the real page all match and said it "worked wonderfully". Two reader fixes came out of it: v0.3.1 (the live column names AS, DG, BL) and v0.3.5 (team-by-set rows such as "Set 1" and "Match" showed up as player cards). Still missing: a real Copy for Claude JSON saved as a test fixture.
 - The site was first deployed through the Vercel API, before this repo existed. Once the repo is connected to the Vercel project, Git pushes take over (see "Deployment notes").
 
 ## History
@@ -16,6 +16,7 @@
 | Oct 17 (morning) | Moved to Vercel. Both pages run on one computer, and Tampermonkey may not be allowed on the work machine. Added the board page with paste-a-link (an event ID or URL opens the stats tab), the bookmarklet and console starters, `/setup`, `/practice`, impact-player stars (MSU roster preloaded, MSU stars kept across matches, opponents keyed by team code), a per-event engine reset, and Reader check with "Copy for Claude". Deployed v0.2.0. |
 | Oct 17 (afternoon) | v0.2.1: one-click Tampermonkey install that pulls the reader through `@require` and updates itself; setup steps for Chrome 138+ (Allow User Scripts) and older Chrome/Edge (Developer mode); a pre-game test on a finished real match; the board warns about an outdated reader. Repo pushed to StatPopperLIVE. |
 | Oct 17 (3 pm) | v0.3.0, PR from `feat/pin-team-stats-fill`. William saw cards pop in and out on the practice page, and team pops that were almost only runs. Added: **Pin** on each player card (10 minutes or until Unpin, still updating); each side always fills 3 player cards and 2 team cards (team hit %, kills, blocks, digs, aces and set hit % as filler); at least 2 options per card; filler cards and options greyed until they reach pop level; a 4-rally stickiness bonus for new cards. On the Idaho replay, cards gone within 2 rallies of arriving fell from 56 to 24. Also: the build and e2e test now run on Windows (LF output, UTF-8 reads, `.gitattributes`). |
+| Oct 17 (evening) | First live match. Jarvis Prime (William's monitoring agent) shipped v0.3.1 (read the live headers `S # PLAYER K E TA HIT% AS SA DG BL`), v0.3.2 (greyed pre-match preview), v0.3.3 (team colours) and v0.3.4 (StatBroadcast's `[Paused]` title). After the match William reported set and match stats among the player cards, which he had to Hide and Pass repeatedly. v0.3.5: the reader reads only tables with a `#` or `PLAYER` column, takes the jersey only from the `#` cell, and skips team, totals, set and match rows. The mock now uses the live headers, a TEAM row and a team-by-set table, and the e2e test checks for it (26 checks). |
 
 ## Decisions (don't reopen without William)
 
@@ -28,7 +29,7 @@
 
 ## Unverified and at risk
 
-- [ ] **Real page structure.** The score is assumed to be in the tab title as `"UI 18, MSU 24 - SET 3"` (visitor first). Box-score tables are assumed to use StatCrew headers. The play-by-play/console text is assumed to be StatCrew style (`[Server] Kill by Last, First (from Setter).`) or plain English. All three need confirming with Reader check → Copy for Claude JSON from a live match.
+- [ ] **Real page structure: mostly confirmed Oct 17, no fixture yet.** The tab title and the box score read correctly on the live page (box score after v0.3.1). The team-by-set table's exact layout was never captured: the v0.3.5 fix rejects it by structure (no `#` or `PLAYER` column) and by label, and the mock's version is a guess. Next match: Reader check → Copy for Claude, check `ignoredTables` and `tables[].skipped`, and save the JSON under `test/`.
 - [ ] **Window linking on the real site.** If StatBroadcast sends `Cross-Origin-Opener-Policy`, the board-to-stats-tab link breaks. The fallback is the dock's "Show here".
 - [ ] **CSP.** If the page's CSP blocks the bookmarklet's `<script src>`, the fallback is the console paste from `/setup`.
 - [ ] **Accept & Continue.** The terms prompt must be accepted before the box score renders. The reader waits and shows a message in the meantime.

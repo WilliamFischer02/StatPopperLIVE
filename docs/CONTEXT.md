@@ -77,7 +77,14 @@ This is the long-form record of what was asked for, what was decided, why, and w
 - **Bot detection.** Automated fetches of the page fail. This was seen again on Oct 17: a plain fetch of the event page errored. Treat this as a wall to respect, not a puzzle to solve.
 - **There is a terms prompt.** "Accept & Continue" must be clicked before the stats render. The reader waits and shows a message until then.
 
-**Assumed and never verified.** These assumptions came from StatCrew conventions and indirect research; nobody has seen the live DOM.
+**Seen on the live page (Oct 17, SUU at MSU, event 670274).**
+
+- The player box heads its columns `S # PLAYER K E TA HIT% AS SA DG BL`, so blocks come as one combined `BL` count (v0.3.1). It has a TEAM row.
+- The tab title gets a `[Paused]` prefix when StatBroadcast stops refreshing (v0.3.4).
+- There are team-by-set tables with volleyball columns, and their rows ("Set 1", "Set 2", "Match") were read as players until v0.3.5. William reported this. The exact layout wasn't captured, so the mock's version is a guess.
+- A TEAM COMPARISON table (ATK, SACE, BLKS) doesn't qualify as a box score.
+
+**Assumed before Oct 17.** These assumptions came from StatCrew conventions and indirect research. The title format and table reading now work on the live page; the rest is still unconfirmed.
 
 - The tab title carries the score as `"UI 18, MSU 24 - SET 3"` (visitor first), and `"... - FINAL"` when the match ends.
 - The box score is ordinary HTML `<table>`s in the top-level document, not inside an iframe, with StatCrew column headers (`#`, `Player`, `K`, `E`, `TA`, `PCT`, `A`, `SA`, `SE`, `RE`, `DIG`, `BS`, `BA`, `BE`) and a `Totals` row.
@@ -330,7 +337,8 @@ Play capture can only be tested during a live match.
 | Oct 17, about 14:55 | v0.2.1 deployed from GitHub (commit `d177ba7`, deployment `dpl_EQ1uGfryhPzMp8xjY3FVPtCkU4ix`): all 13 live files byte-identical to the repo build; live e2e, 23 checks including a Tampermonkey-style start linking to the live board | All passed |
 | Oct 17, about 2:50 | v0.3.0 local: replay test with board-rule assertions; e2e 25 checks on Windows; CI on Linux | All passed |
 | Oct 17, about 3:00 | v0.3.0 preview (`dpl_AfCwpWwEcfwnDy4BgvBeBTQ7DMZd`) e2e 25 checks; production (`dpl_4apAsiymyoBRyuBsxA9sD2phgjjA`, `main` `d143a8d`): 13 live files byte-identical, live e2e 26 checks | All passed |
-| Never | Reader on a real StatBroadcast page | **Not yet.** Do the pre-game test in §7 |
+| Oct 17, 7:00 pm | Reader on the real StatBroadcast page, SUU at MSU (670274), the whole match | Worked after v0.3.1. Set and match rows appeared as player cards (fixed in v0.3.5). No Copy for Claude JSON saved yet |
+| Oct 17, about 11:30 pm | v0.3.5 local: mock with the live headers, TEAM row and team-by-set tables. Before the fix it reproduced the bug (cards "1", "2", "3", "Match"; dock 17 + 15 players). After the fix: 14 + 13 players; replay test and e2e (26 checks) | All passed |
 
 ---
 
