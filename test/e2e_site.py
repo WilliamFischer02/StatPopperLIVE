@@ -99,6 +99,11 @@ with sync_playwright() as p:
     check(len(s1["home"]) == 3 and len(s1["away"]) == 3, "3 player cards per side")
     dock = stats.evaluate("document.getElementById('spb-dock').shadowRoot.getElementById('dt').textContent")
     check("board linked" in dock, f"stats-tab dock shows the link ({dock})")
+    # The mock's team-by-set tables (Set 1, Set 2, Match) and TEAM rows must never become player cards.
+    roster = stats.evaluate("[document.querySelectorAll('#t-home tbody tr').length - 2, document.querySelectorAll('#t-away tbody tr').length - 1]")
+    summary = [x for x in s1["home"] + s1["away"] if re.match(r"^(set|match|team|totals?|\d+)\b", x, re.I)]
+    check(not summary and f"reading {roster[0]} + {roster[1]} players" in dock,
+          f"set, match and team rows are not read as players ({summary or dock}; expected {roster[0]} + {roster[1]})")
 
     # 2. Impact players: star Greeny (MSU) and Armstrong (UI) from the picker.
     board.click("#starsbtn")

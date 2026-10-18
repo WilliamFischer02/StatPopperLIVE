@@ -1,11 +1,11 @@
-/* Stat Pop Board 0.3.4: reads only the page you have open and shares it with the board window on this computer. */
+/* Stat Pop Board 0.3.5: reads only the page you have open and shares it with the board window on this computer. */
 (function () {
 'use strict';
 if (window.SPB && window.SPB.version) { if (!window.__spbNoReader && window.SPB.show) window.SPB.show(); return; }
 var cs = document.currentScript;
-var SPB = { version: "0.3.4" };
+var SPB = { version: "0.3.5" };
 SPB.origin = window.__spbOrigin || (cs && cs.src ? new URL(cs.src, location.href).origin : null) || "https://stat-pop-board.vercel.app";
-SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.3.4' : null;
+SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.3.5' : null;
 SPB.fontsHref = "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap";
 SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos":"OH"},{"uni":"5","first":"Keely","last":"Culler","pos":"OH"},{"uni":"6","first":"Teagan","last":"Jaynes","pos":"S"},{"uni":"7","first":"Lauren","last":"Schloe","pos":"MB/OPP"},{"uni":"9","first":"Maggie","last":"Rhew","pos":"S/DS"},{"uni":"11","first":"Elli","last":"Esko","pos":"OH"},{"uni":"12","first":"Afton","last":"Thomsen","pos":"L/DS"},{"uni":"13","first":"Jolene","last":"Green Ewen","pos":"MB"},{"uni":"14","first":"Taylor","last":"McDonald","pos":"MH/OPP"},{"uni":"15","first":"Teya","last":"Yeomans","pos":"OH"},{"uni":"16","first":"Haven","last":"Rich","pos":"L/DS"},{"uni":"17","first":"Alice","last":"Steman","pos":"MB"},{"uni":"18","first":"Karli","last":"Heidemann","pos":"OH"},{"uni":"22","first":"Joelie","last":"Spelts","pos":"MB"},{"uni":"23","first":"Elli","last":"Tufto","pos":"OH"},{"uni":"45","first":"Nicolette","last":"Noble","pos":"L/DS"}] };
 /*
@@ -1095,6 +1095,9 @@ function startReader(SPB) {
     return map.k != null && (map.ta != null || map.pct != null) && extra >= 2;
   }
   const looksBasketball = (table) => /\bREB\b|\bFG\b|\b3PT\b|\bFGM\b/.test(cellText(table.rows[0] || table).toUpperCase());
+  // Summary rows that sit in or beside a box score: team, totals, and team-by-set rows ("Set 1", "Match").
+  // Seen as player cards on the live page on 2026-10-17, so they are rejected by label as well as by table.
+  const NON_PLAYER = /^(sets?|game|match|totals?|team|tm|opp(onent)?s?)\b|^\d+(st|nd|rd|th)?(\s+sets?)?$/i;
 
   function splitName(raw) {
     let s = raw.replace(/\*/g, '').replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim().replace(/^\d+\s+/, '');
@@ -1128,15 +1131,23 @@ function startReader(SPB) {
     return { vis: null, home: null };
   }
 
+  const ignoredTables = [];
   function readTables(title, names) {
     const found = [];
+    ignoredTables.length = 0;
     for (const table of document.querySelectorAll('table')) {
       if (ours(table)) continue;
       const hm = headerMap(table);
       if (!hm || !looksVolleyball(hm.map)) continue;
       const bits = contextBits(table);
       if (/season|career|cumulative/i.test(bits.slice(0, 2).join(' '))) continue;
-      const players = [];
+      // A player box has a jersey or a name column. Team-by-set and comparison tables have volleyball
+      // columns but neither, and their rows ("Set 1", "Match") would otherwise read as players.
+      if (hm.map.uni == null && hm.map.name == null) {
+        if (ignoredTables.length < 4) ignoredTables.push({ headers: Object.keys(hm.map).join(' '), rows: table.rows.length, context: bits.join(' | ').slice(0, 100) });
+        continue;
+      }
+      const players = [], skipped = [];
       let totals = null;
       const rows = [...table.rows];
       for (const tr of rows.slice(rows.indexOf(hm.tr) + 1)) {
@@ -1147,12 +1158,18 @@ function startReader(SPB) {
         for (const k of ['k', 'e', 'ta', 'a', 'sa', 'se', 're', 'dig', 'bs', 'ba', 'be']) stats[k] = val(k);
         if (/^\s*(team\s+)?totals?\b/i.test(lead) || /\btotals?\b/i.test(cells.slice(0, 2).map(cellText).join(' '))) { totals = stats; continue; }
         if (/^\s*(tm|team)\b/i.test(lead)) continue;
-        let uni = hm.map.uni != null && cells[hm.map.uni] ? cellText(cells[hm.map.uni]) : null;
-        if (!uni || !/^\d{1,2}$/.test(uni)) { const c = cells.find((x) => /^\d{1,2}$/.test(cellText(x))); uni = c ? cellText(c) : null; }
         const nameCell = hm.map.name != null ? cells[hm.map.name] : cells.find((x) => /[A-Za-z]{2}/.test(cellText(x)));
-        if (!uni || !nameCell) continue;
-        const nm = splitName(cellText(nameCell));
-        if (!nm.last) continue;
+        const raw = nameCell ? cellText(nameCell) : '';
+        // The jersey comes from the # column, or leads the name ("12 Smith"). Never from another cell:
+        // a stat value there would key a summary row as a player.
+        const um = (hm.map.uni != null && cells[hm.map.uni] ? cellText(cells[hm.map.uni]) : '').match(/^#?(\d{1,2})(?!\d)/)
+          || raw.match(/^(\d{1,2})\s/);
+        const uni = um ? um[1] : '';
+        const nm = splitName(raw);
+        if (!uni || !raw || NON_PLAYER.test(raw.replace(/^[^A-Za-z0-9]+/, '')) || !/\p{L}/u.test(nm.last)) {
+          if (raw && skipped.length < 6) skipped.push(raw.slice(0, 30));
+          continue;
+        }
         players.push({ uni, first: nm.first, last: nm.last, ...stats });
       }
       if (!players.length) continue;
@@ -1163,7 +1180,7 @@ function startReader(SPB) {
         if (h && !v) { side = 'home'; break; }
         if (v && !h) { side = 'vis'; break; }
       }
-      found.push({ table, side, players, totals, headers: Object.keys(hm.map), ctx: bits.join(' | ').slice(0, 140) });
+      found.push({ table, side, players, totals, skipped, headers: Object.keys(hm.map), ctx: bits.join(' | ').slice(0, 140) });
     }
     const unassigned = found.filter((f) => !f.side);
     if (unassigned.length) {
@@ -1265,7 +1282,8 @@ function startReader(SPB) {
     diag.parsedTitle = title;
     diag.paused = titlePaused(document.title);
     diag.names = names;
-    diag.tables = tables.map((t) => ({ side: t.side, players: t.players.length, totals: !!t.totals, headers: t.headers.join(' '), context: t.ctx }));
+    diag.tables = tables.map((t) => ({ side: t.side, players: t.players.length, totals: !!t.totals, headers: t.headers.join(' '), skipped: t.skipped, context: t.ctx }));
+    diag.ignoredTables = ignoredTables.slice();
     if (!title) return { error: 'Waiting for the score in the tab title (accept the terms on the stats page if you haven’t).' };
     if (!tables.some((t) => t.side === 'vis') || !tables.some((t) => t.side === 'home')) {
       const bb = [...document.querySelectorAll('table')].some(looksBasketball);
@@ -1438,7 +1456,7 @@ function startReader(SPB) {
   }
   function diagSummary() {
     return { version: VERSION, eventId, url: location.href.split('#')[0], title: diag.title, parsedTitle: diag.parsedTitle,
-      names: diag.names, tables: diag.tables, error: state.error, linesCaptured: lineSeq, paused: !!diag.paused };
+      names: diag.names, tables: diag.tables, ignoredTables: diag.ignoredTables, error: state.error, linesCaptured: lineSeq, paused: !!diag.paused };
   }
   function send(force) {
     const t = target();

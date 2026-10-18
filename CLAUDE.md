@@ -25,7 +25,7 @@ A personal second-monitor tool for William, who runs the graphics computer for M
 python3 tools/build_site.py            # rebuild site/ and vercel.json
 python3 tools/build_site.py --check    # exit 1 if site/ is stale (CI runs this)
 node test/replay.test.js               # engine replay of the Oct 1 match: prints the cards and asserts the board rules (fill, Pin)
-python3 test/e2e_site.py [shots_dir]   # Playwright end-to-end test against the local build (25 checks)
+python3 test/e2e_site.py [shots_dir]   # Playwright end-to-end test against the local build (26 checks)
 E2E_BASE=https://stat-pop-board.vercel.app python3 test/e2e_site.py   # same checks against the live site
 python3 tools/build_replay.py          # only if data/msu-idaho-2026-10-01.txt changes: rebuilds replay JSON and replay-src.json
 ```
@@ -104,7 +104,8 @@ P = { uni, first, last, k, e, ta, a, sa, se, re, dig, bs, ba, be }
 **Reader (`src/reader.js`).**
 
 - **Paused.** StatBroadcast prefixes the tab title with `[Paused]` when it stops refreshing the page (seen 2026-10-17). The reader strips any leading `[tag]` before parsing (otherwise it lands in the visitor's team code and rekeys stars and colours) and reports `diag.paused`; the board shows mode **Paused** with a notice, and the dock and overlay say so. The reader never pokes the page to resume it.
-- **Tables.** The table's headers are mapped (K, E, TA, PCT, A, SA, SE, RE, DIG, BS, BA, BE…), and a table counts as volleyball only if it has K plus TA or PCT plus at least 2 more columns.
+- **Tables.** The table's headers are mapped (K, E, TA, PCT, A, SA, SE, RE, DIG, BS, BA, BE…, plus the live page's HIT%, AS, DG, BL), and a table counts as volleyball only if it has K plus TA or PCT plus at least 2 more columns.
+- **Player rows only (v0.3.5).** The live page also has team-by-set tables with volleyball columns, and on Oct 17 their "Set 1 … Match" rows showed up as player cards. A table needs a `#` or `PLAYER` column to be read as a box score (others are listed in `diag.ignoredTables`). The jersey comes only from the `#` cell or the start of the name. Rows labelled team, totals, set, game, match or opponent are skipped (`diag.tables[].skipped`).
 - **Sides.** Which team a table belongs to comes from nearby captions and headings.
 - **Play lines.** A batch of 3 or fewer changed lines counts as new plays, repeats included. A bigger batch means the page redrew, so only lines never seen before count. The same text within 3 s is dropped as a duplicate.
 

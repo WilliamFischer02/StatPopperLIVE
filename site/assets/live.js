@@ -269,6 +269,8 @@
     }
     const d = last.diag || {}, s = last.snap;
     const tables = (d.tables || []).map((t) => `${t.side === 'home' ? 'Home' : 'Visitor'}: ${t.players} players${t.totals ? ' + totals row' : ''}`).join(' · ') || '<span class="bad">none found</span>';
+    const ign = (d.ignoredTables || []).length;
+    const tablesNote = ign ? ` · ${ign} team or by-set ${ign === 1 ? 'table' : 'tables'} skipped` : '';
     const score = s ? `${s.teams.home.code} ${s.score.home} – ${s.score.away} ${s.teams.away.code} · ${s.status === 'final' ? 'Final' : 'Set ' + s.set} · sets ${s.setsWon.home}–${s.setsWon.away}` : '<span class="bad">not read</span>';
     const lines = (last.lines || []).slice(-3).reverse().map((l) => `<div><code>${esc(l.text)}</code></div>`).join('') || '<span class="bad">none yet (they appear as plays happen)</span>';
     $('check').innerHTML = `<h3>Reader check</h3>
@@ -277,7 +279,7 @@
         <dt>Status</dt><dd>${last.ok ? (d.paused ? '<span class="bad">StatBroadcast paused (its tab title starts with [Paused])</span>' : '<span class="ok">Reading OK</span>') : '<span class="bad">' + esc(last.error || 'Waiting') + '</span>'}</dd>
         <dt>Tab title</dt><dd><code>${esc(d.title || '')}</code></dd>
         <dt>Score read</dt><dd>${score}</dd>
-        <dt>Tables found</dt><dd>${tables}</dd>
+        <dt>Tables found</dt><dd>${tables}${tablesNote}</dd>
         <dt>Plays captured</dt><dd>${d.linesCaptured || 0} since the reader started${lines}</dd>
         <dt>Link</dt><dd>${msgs} updates received · last ${secs(Date.now() - lastAt)} s ago · reader ${esc(d.version || '?')} · ${esc(d.url || '')}</dd>
       </dl>
