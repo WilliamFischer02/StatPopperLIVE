@@ -230,9 +230,9 @@
     } else if (!last.ok) {
       mode = 'Linked'; cls = 'link'; conn = 'Stats tab linked · ' + (last.error || 'waiting for stats');
     } else {
-      mode = 'Live'; cls = 'live';
-      const s = last.snap;
-      conn = `${s.teams.away.code} at ${s.teams.home.code} · ${last.eventId === 'practice' ? 'practice page' : 'event ' + last.eventId} · last stat change ${secs(now - lastChangeAt)} s ago`;
+      const s = last.snap, paused = !!(last.diag && last.diag.paused);
+      mode = paused ? 'Paused' : 'Live'; cls = paused ? 'wait' : 'live';
+      conn = `${s.teams.away.code} at ${s.teams.home.code} · ${last.eventId === 'practice' ? 'practice page' : 'event ' + last.eventId} · last stat change ${secs(now - lastChangeAt)} s ago` + (paused ? ' · StatBroadcast paused' : '');
     }
     $('mode').textContent = mode;
     $('mode').className = 'mode ' + cls;
@@ -245,6 +245,7 @@
     $('newlink').hidden = !view || startForced;
     // Notices
     const notes = [];
+    if (last && last.ok && last.diag && last.diag.paused) notes.push('StatBroadcast has paused its own live updates (the stats tab title starts with [Paused]). Click anywhere on the stats page to wake it, and press its Resume control if it shows one. The board is holding the last numbers it saw.');
     if (view && last && !last.ok && age < 20000) notes.push('The stats page isn’t showing its box score right now. The board is holding the last numbers it saw. ' + (last.error || ''));
     if (last && openedEvent && last.eventId !== openedEvent && last.eventId !== 'page') notes.push(`The linked stats tab is on event ${last.eventId}, not the one you opened (${openedEvent}).`);
     const readerVersion = last && last.diag && last.diag.version;
@@ -273,7 +274,7 @@
     $('check').innerHTML = `<h3>Reader check</h3>
       <p class="note">Compare these with the stats page. If they match, the board is reading it correctly.</p>
       <dl class="kv">
-        <dt>Status</dt><dd>${last.ok ? '<span class="ok">Reading OK</span>' : '<span class="bad">' + esc(last.error || 'Waiting') + '</span>'}</dd>
+        <dt>Status</dt><dd>${last.ok ? (d.paused ? '<span class="bad">StatBroadcast paused (its tab title starts with [Paused])</span>' : '<span class="ok">Reading OK</span>') : '<span class="bad">' + esc(last.error || 'Waiting') + '</span>'}</dd>
         <dt>Tab title</dt><dd><code>${esc(d.title || '')}</code></dd>
         <dt>Score read</dt><dd>${score}</dd>
         <dt>Tables found</dt><dd>${tables}</dd>

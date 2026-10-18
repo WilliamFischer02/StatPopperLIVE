@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Stat Pop Board reader
 // @namespace    goob-entertainment.stat-pop-board
-// @version      0.3.3
+// @version      0.3.4
 // @description  Starts the Stat Pop Board reader on StatBroadcast pages. It reads only the page you have open.
 // @match        https://stats.statbroadcast.com/broadcast/*
 // @match        https://*.statbroadcast.com/broadcast/*
-// @require      https://stat-pop-board.vercel.app/spb.js?v=0.3.3
+// @require      https://stat-pop-board.vercel.app/spb.js?v=0.3.4
 // @updateURL    https://stat-pop-board.vercel.app/stat-pop-board.user.js
 // @downloadURL  https://stat-pop-board.vercel.app/stat-pop-board.user.js
 // @run-at       document-idle

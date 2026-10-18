@@ -103,6 +103,7 @@ P = { uni, first, last, k, e, ta, a, sa, se, re, dig, bs, ba, be }
 
 **Reader (`src/reader.js`).**
 
+- **Paused.** StatBroadcast prefixes the tab title with `[Paused]` when it stops refreshing the page (seen 2026-10-17). The reader strips any leading `[tag]` before parsing (otherwise it lands in the visitor's team code and rekeys stars and colours) and reports `diag.paused`; the board shows mode **Paused** with a notice, and the dock and overlay say so. The reader never pokes the page to resume it.
 - **Tables.** The table's headers are mapped (K, E, TA, PCT, A, SA, SE, RE, DIG, BS, BA, BE…), and a table counts as volleyball only if it has K plus TA or PCT plus at least 2 more columns.
 - **Sides.** Which team a table belongs to comes from nearby captions and headings.
 - **Play lines.** A batch of 3 or fewer changed lines counts as new plays, repeats included. A bigger batch means the page redrew, so only lines never seen before count. The same text within 3 s is dropped as a duplicate.

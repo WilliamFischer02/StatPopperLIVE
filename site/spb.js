@@ -1,11 +1,11 @@
-/* Stat Pop Board 0.3.3: reads only the page you have open and shares it with the board window on this computer. */
+/* Stat Pop Board 0.3.4: reads only the page you have open and shares it with the board window on this computer. */
 (function () {
 'use strict';
 if (window.SPB && window.SPB.version) { if (!window.__spbNoReader && window.SPB.show) window.SPB.show(); return; }
 var cs = document.currentScript;
-var SPB = { version: "0.3.3" };
+var SPB = { version: "0.3.4" };
 SPB.origin = window.__spbOrigin || (cs && cs.src ? new URL(cs.src, location.href).origin : null) || "https://stat-pop-board.vercel.app";
-SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.3.3' : null;
+SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.3.4' : null;
 SPB.fontsHref = "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap";
 SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos":"OH"},{"uni":"5","first":"Keely","last":"Culler","pos":"OH"},{"uni":"6","first":"Teagan","last":"Jaynes","pos":"S"},{"uni":"7","first":"Lauren","last":"Schloe","pos":"MB/OPP"},{"uni":"9","first":"Maggie","last":"Rhew","pos":"S/DS"},{"uni":"11","first":"Elli","last":"Esko","pos":"OH"},{"uni":"12","first":"Afton","last":"Thomsen","pos":"L/DS"},{"uni":"13","first":"Jolene","last":"Green Ewen","pos":"MB"},{"uni":"14","first":"Taylor","last":"McDonald","pos":"MH/OPP"},{"uni":"15","first":"Teya","last":"Yeomans","pos":"OH"},{"uni":"16","first":"Haven","last":"Rich","pos":"L/DS"},{"uni":"17","first":"Alice","last":"Steman","pos":"MB"},{"uni":"18","first":"Karli","last":"Heidemann","pos":"OH"},{"uni":"22","first":"Joelie","last":"Spelts","pos":"MB"},{"uni":"23","first":"Elli","last":"Tufto","pos":"OH"},{"uni":"45","first":"Nicolette","last":"Noble","pos":"L/DS"}] };
 /*
@@ -1038,15 +1038,19 @@ function startReader(SPB) {
 
   // ---------------------------------------------------------- page reading
 
+  // StatBroadcast prefixes the tab title with "[Paused]" once it has stopped refreshing the page
+  // (seen 2026-10-17). That is a state flag, not part of a team code: strip any leading [tag] before
+  // parsing, or it lands in the visitor's code and rekeys stars and colours for as long as it lasts.
+  const titlePaused = (t) => /^\s*\[paused\]/i.test(String(t || ''));
   function parseTitle(t) {
-    const m = String(t || '').match(/^\s*([^,]*?)\s*(\d+)?\s*,\s*(.*?)\s*(\d+)?\s+-\s+(.*?)\s*$/);
+    const m = String(t || '').replace(/^\s*\[[^\]]*\]\s*/, '').match(/^\s*([^,]*?)\s*(\d+)?\s*,\s*(.*?)\s*(\d+)?\s+-\s+(.*?)\s*$/);
     if (!m) return null;
     const status = m[5];
     const setM = status.match(/set\s*(\d+)/i);
     return {
       vis: { code: m[1].trim(), score: m[2] == null ? 0 : +m[2] },
       home: { code: m[3].trim(), score: m[4] == null ? 0 : +m[4] },
-      final: /final/i.test(status), set: setM ? +setM[1] : null, raw: status,
+      final: /final/i.test(status), set: setM ? +setM[1] : null, raw: status, paused: titlePaused(t),
     };
   }
 
@@ -1259,6 +1263,7 @@ function startReader(SPB) {
     tables.forEach((t) => statTables.add(t.table));
     diag.title = document.title;
     diag.parsedTitle = title;
+    diag.paused = titlePaused(document.title);
     diag.names = names;
     diag.tables = tables.map((t) => ({ side: t.side, players: t.players.length, totals: !!t.totals, headers: t.headers.join(' '), context: t.ctx }));
     if (!title) return { error: 'Waiting for the score in the tab title (accept the terms on the stats page if you haven’t).' };
@@ -1433,7 +1438,7 @@ function startReader(SPB) {
   }
   function diagSummary() {
     return { version: VERSION, eventId, url: location.href.split('#')[0], title: diag.title, parsedTitle: diag.parsedTitle,
-      names: diag.names, tables: diag.tables, error: state.error, linesCaptured: lineSeq };
+      names: diag.names, tables: diag.tables, error: state.error, linesCaptured: lineSeq, paused: !!diag.paused };
   }
   function send(force) {
     const t = target();
@@ -1447,11 +1452,12 @@ function startReader(SPB) {
 
   function updateDock() {
     const dot = D('dot');
-    dot.className = 'dot ' + (state.ok ? 'ok' : state.kind === 'err' ? 'err' : '');
+    dot.className = 'dot ' + (state.ok ? (diag.paused ? '' : 'ok') : state.kind === 'err' ? 'err' : '');
     let text;
     if (state.ok) {
       const s = state.raw;
-      text = `reading ${s.teams.home.players.length} + ${s.teams.away.players.length} players`;
+      text = diag.paused ? 'StatBroadcast paused its updates · click into the page to resume'
+        : `reading ${s.teams.home.players.length} + ${s.teams.away.players.length} players`;
     } else text = state.error;
     const link = linked() ? ' · board linked' : bridgeNote ? ' · ' + bridgeNote : '';
     D('dt').innerHTML = '';
@@ -1486,7 +1492,7 @@ function startReader(SPB) {
       }
       if (overlayOpen()) {
         const age = Math.round((Date.now() - lastChange) / 1000);
-        shadow.getElementById('status').textContent = `Reading this page · last change ${age}s ago`;
+        shadow.getElementById('status').textContent = (diag.paused ? 'StatBroadcast paused · click its page to resume' : 'Reading this page') + ` · last change ${age}s ago`;
       }
     }
     updateDock();
