@@ -349,7 +349,7 @@ function startReader(SPB) {
     shadow = host.attachShadow({ mode: 'open' });
     shadow.innerHTML = `${SPB.cssHref ? `<link rel="stylesheet" href="${SPB.cssHref}">` : ''}<div class="spb-root"><div class="app">
       <header class="bar">
-        <div class="brand"><b>Stat Pop Board</b><span class="mode live">Live</span></div>
+        <div class="brand"><b>Stat Pop Board</b><span class="mode live">&#9679; Live</span></div>
         <span class="matchline" id="status">Reading this page…</span>
         <div class="transport">
           <button class="tbtn" id="swap">Swap sides</button>
@@ -465,15 +465,15 @@ function startReader(SPB) {
     let text;
     if (state.ok) {
       const s = state.raw;
-      text = diag.paused ? 'StatBroadcast paused its updates · click into the page to resume'
-        : `reading ${s.teams.home.players.length} + ${s.teams.away.players.length} players`;
+      text = diag.paused ? 'paused · click the page to resume'
+        : `${s.teams.home.players.length} + ${s.teams.away.players.length} players`;
     } else text = state.error;
     const link = linked() ? ' · board linked' : bridgeNote ? ' · ' + bridgeNote : '';
     D('dt').innerHTML = '';
     const b = document.createElement('b'); b.textContent = 'Pop board';
     D('dt').append(b, ' · ' + text + link);
     D('dt').title = text + link;
-    D('openwin').textContent = linked() ? 'Board linked' : 'Open board';
+    D('openwin').textContent = 'Open board';
   }
 
   // ---------------------------------------------------------- loop
@@ -525,7 +525,7 @@ function startReader(SPB) {
       if (texts.length) recordBatch(texts);
     }
     clearTimeout(debounce);
-    debounce = setTimeout(() => tick(false), 250);
+    debounce = setTimeout(() => tick(false), 100);
   }).observe(document.documentElement, { subtree: true, childList: true, characterData: true });
 
   // If the board opened this tab, say hello so it knows the reader is running.

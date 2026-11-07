@@ -232,7 +232,9 @@
     const clock = opts.now || (() => Date.now());
     // minPops: options per player card, filling with greyed lines if needed. holdMs: how long Pin keeps a card.
     // dwellRallies: a card that just arrived gets a stickiness bonus for this many rallies, so cards don't flicker.
-    const cfg = { pops: VB_POPS, maxCards: 3, maxPops: 3, minPops: 2, maxTeamCards: 2, passRallies: 10,
+    // maxCards: player cards per side (3 or 5; the full-list layout highlights maxCards rows).
+    // Team card: one per side with minTeamLines..maxTeamLines stat lines, notable ones first.
+    const cfg = { pops: VB_POPS, maxCards: 3, maxPops: 3, minPops: 2, minTeamLines: 3, maxTeamLines: 5, passRallies: 10,
       holdMs: 10 * 60 * 1000, dwellRallies: 4 };
     // held: cards William pinned with the Pin button, key -> { since, until } in clock ms.
     const user = { hidden: new Set(), passed: {}, stars: { home: [], away: [] }, held: {} };
@@ -245,6 +247,8 @@
         points: [], plays: [], involvement: [], pins: { home: null, away: null },
         serve: freshServe(),
         prevSel: { home: [], away: [] }, prevTeam: { home: [], away: [] }, since: {},
+        // statAt: the rally when each player's stat line last changed (staleness). rotateDue: set by rotate().
+        statAt: {}, prevStats: {}, rotateDue: { home: false, away: false },
         consoleAlert: null, setWon: null,
         prevTotals: null, setStart: null, finishedSet: null,
       };
@@ -252,6 +256,25 @@
       last = null;
     }
     reset();
+
+    // Summary rows that a page reader might still pass as players (team, totals, "Set 1", "Match"). The reader
+    // rejects them too (v0.3.5); this is the second line of defence so they never reach a card or a total.
+    const NON_PLAYER = /^(sets?|game|match|totals?|team|tm|opp(onent)?s?)\b|^\d+(st|nd|rd|th)?(\s+sets?)?$/i;
+    const realPlayer = (p) => p && /^\d{1,2}$/.test(String(p.uni || '').trim()) && /\p{L}/u.test(String(p.last || '')) && !NON_PLAYER.test(String(p.last || '').trim());
+    function cleanSnapshot(s) {
+      const t = {};
+      for (const side of SIDES) t[side] = { ...s.teams[side], players: (s.teams[side].players || []).filter(realPlayer) };
+      return { ...s, teams: t };
+    }
+
+    const STAT_FIELDS = ['k', 'e', 'ta', 'a', 'sa', 'se', 're', 'dig', 'bs', 'ba', 'be'];
+    function trackStats(s) {
+      for (const side of SIDES) for (const p of s.teams[side].players) {
+        const key = playerKey(side, p.uni);
+        const h = STAT_FIELDS.map((f) => num(p[f])).join(',');
+        if (mem.prevStats[key] !== h) { mem.prevStats[key] = h; mem.statAt[key] = mem.rally; }
+      }
+    }
 
     function onPoint(side) {
       mem.rally += 1;
@@ -346,6 +369,8 @@
         if (play.server || play.act) pointPlay = play;
       }
       if (mem.plays.length > 60) mem.plays.splice(0, mem.plays.length - 60);
+      // Involvement only counts for 12 rallies; drop older entries so the list never grows for a whole match.
+      if (mem.involvement.length > 80) mem.involvement = mem.involvement.filter((x) => mem.rally - x.rally <= 12);
       trackServe(pointPlay, pointSide);
     }
 
@@ -431,17 +456,20 @@
       fill('ace', T.sa > 0, T.sa / (1.5 * e), pl(T.sa, 'Ace'), `${oc} ${O.sa}`);
       if (S) fill('sethit', S.ta >= 8, (S.pct - 0.1) / 0.2, `Set ${s.set} Hit% ${fmtPct(S.pct, true)}`, `${oc} ${fmtPct(So.pct, true)} this set`);
 
-      // Pre-match preview: no team has a stat yet, so none of the fillers above qualify. Show the two
-      // everyday lines at their zero values, greyed, so both team columns have cards before first serve.
+      // Pre-match preview: no team has a stat yet, so none of the fillers above qualify. Show the everyday
+      // lines at their zero values, greyed, so both team cards have lines before first serve.
       if (s.status === 'pre' && !c.length) {
         const z = (x) => fmtPct(x.ta > 0 ? x.pct : 0, true);
         c.push({ id: 'hit', dim: true, score: 0.06, big: `Team Hit% ${z(T)}`, sub: `${oc} ${z(O)}` });
         c.push({ id: 'kills', dim: true, score: 0.05, big: pl(T.k, 'Kill'), sub: `${oc} ${O.k}` });
+        c.push({ id: 'blk', dim: true, score: 0.04, big: pl(fmtHalf(T.tb), 'Block'), sub: `${oc} ${fmtHalf(O.tb)}` });
       }
       const prev = mem.prevTeam[side];
       for (const x of c) if (prev.includes(x.id)) x.score += 0.2;
       c.sort((a, b) => b.score - a.score);
-      const pick = c.slice(0, cfg.maxTeamCards);
+      // One team card per side: up to maxTeamLines notable lines; greyed fillers only top it up to minTeamLines.
+      const pick = c.filter((x) => !x.dim).slice(0, cfg.maxTeamLines);
+      for (const x of c) { if (pick.length >= cfg.minTeamLines) break; if (!pick.includes(x)) pick.push(x); }
       mem.prevTeam[side] = pick.map((x) => x.id);
       return pick;
     }
@@ -539,46 +567,90 @@
       const pool = players.map((p) => scorePlayer(p, side, e, highs, s, sv))
         .filter((c) => !user.hidden.has(c.key))
         .filter((c) => c.pinned || c.hold || !(user.passed[c.key] > mem.rally));
-      // Order: cards William pinned, then notable or live cards by impact, then the most active of the
-      // rest (greyed) so the side always has its full set. A card that just arrived is sticky for a few rallies.
-      const prevKeys = new Set(mem.prevSel[side]);
-      const sticky = (c) => (prevKeys.has(c.key) && mem.rally - (mem.since[c.key] ?? -1e9) <= cfg.dwellRallies ? 1.5 : 0);
-      const rank = (c) => (c.eligible ? 10 + c.impact : c.activity + (prevKeys.has(c.key) ? 0.5 : 0) + (c.starred ? 0.35 : 0)) + sticky(c);
-      const held = pool.filter((c) => c.hold).sort((a, b) => a.hold.since - b.hold.since).slice(0, cfg.maxCards);
-      const rest = pool.filter((c) => !c.hold && (c.eligible || c.starred || c.activity > 0)).sort((a, b) => rank(b) - rank(a));
-      const chosen = held.concat(rest).slice(0, cfg.maxCards);
+      const byKey = Object.fromEntries(pool.map((c) => [c.key, c]));
+      const MAX = cfg.maxCards;
+      const rank = (c) => (c.eligible ? 10 + c.impact : c.activity + (c.starred ? 0.35 : 0));
+      const worth = (c) => c.eligible || c.starred || c.activity > 0;
+      // Incumbents: the cards shown last time that still have something to show (a pre-match preview card
+      // with no stat yet drops out as soon as a real stat appears).
+      const prevKeys = mem.prevSel[side].filter((k) => byKey[k] && worth(byKey[k]));
+      const prevSet = new Set(prevKeys);
+      const sticky = (c) => prevSet.has(c.key) && mem.rally - (mem.since[c.key] ?? -1e9) <= cfg.dwellRallies;
+      // Stalest first: the card whose player's stat line changed longest ago, then the one up the longest.
+      const staleness = (c) => (mem.statAt[c.key] ?? -1) * 1000 + (mem.since[c.key] ?? 0);
+      const held = pool.filter((c) => c.hold).sort((a, b) => a.hold.since - b.hold.since).slice(0, MAX);
+      const rotateNow = mem.rotateDue[side];
+      mem.rotateDue[side] = false;
+      let chosen;
+      if (rotateNow || !prevKeys.length) {
+        // Rotation (or the first fill): pins first, then every player with a stat who is not on the board,
+        // best first, then the ones who are. So a rotation turns over all the unpinned cards whenever enough
+        // other players have something to show; starred players are put back below.
+        const fresh = (c) => (rotateNow && !prevSet.has(c.key) ? 1 : 0);
+        const rest = pool.filter((c) => !c.hold && worth(c)).sort((a, b) => fresh(b) - fresh(a) || rank(b) - rank(a));
+        chosen = held.concat(rest).slice(0, MAX);
+      } else {
+        // Between rotations the board holds still. Pins take slots first; then at most one card changes per
+        // update: the best player not on the board replaces the stalest card, and only for a live reason
+        // (named in the last play, a serving streak) or because it clearly outranks a weaker card.
+        chosen = held.slice();
+        for (const k of prevKeys) if (chosen.length < MAX && !chosen.some((c) => c.key === k)) chosen.push(byKey[k]);
+        const inSet = new Set(chosen.map((c) => c.key));
+        const isUrgent = (c) => c.pinned || c.serving;
+        const challengers = pool.filter((c) => !inSet.has(c.key) && !c.hold && worth(c))
+          .sort((a, b) => (isUrgent(b) - isUrgent(a)) || rank(b) - rank(a));
+        while (chosen.length < MAX && challengers.length) chosen.push(challengers.shift());
+        const top = challengers[0];
+        if (top && chosen.length >= MAX) {
+          const urgent = isUrgent(top);
+          // Live cards (named in the last play, or on a serving streak) are never the one swapped out.
+          const victims = chosen.filter((c) => !c.hold && !c.pinned && !c.serving && (urgent || !sticky(c))).sort((a, b) => staleness(a) - staleness(b));
+          const v = victims[0];
+          if (v && (urgent || (top.eligible && (!v.eligible || rank(top) > rank(v) + 0.5)))) chosen[chosen.indexOf(v)] = top;
+        }
+      }
       // Impact players: at least one starred player always has a card on their side.
-      const starredPool = rest.filter((c) => c.starred);
+      const starredPool = pool.filter((c) => c.starred && !c.hold && worth(c)).sort((a, b) => rank(b) - rank(a));
       if (starredPool.length && !chosen.some((c) => c.starred)) {
-        if (chosen.length < cfg.maxCards) chosen.push(starredPool[0]);
+        if (chosen.length < MAX) chosen.push(starredPool[0]);
         else {
-          let idx = -1;
-          for (let i = chosen.length - 1; i >= 0; i--) if (!chosen[i].pinned && !chosen[i].hold) { idx = i; break; }
-          if (idx >= 0) chosen[idx] = starredPool[0];
+          const victims = chosen.filter((c) => !c.hold && !c.pinned && !c.serving).sort((a, b) => staleness(a) - staleness(b));
+          if (victims[0]) chosen[chosen.indexOf(victims[0])] = starredPool[0];
         }
       }
       // Pre-match preview (status 'pre', the page's SET 0): nobody has a stat yet, so the rules above
       // leave the side empty. Fill its slots with the roster in page order, greyed, so the layout can be
       // checked before first serve. Once the set starts this never runs: cards then come only from stats.
-      if (s.status === 'pre' && chosen.length < cfg.maxCards) {
+      if (s.status === 'pre' && chosen.length < MAX) {
         const have = new Set(chosen.map((c) => c.key));
         for (const c of pool) {
-          if (chosen.length >= cfg.maxCards) break;
+          if (chosen.length >= MAX) break;
           if (!have.has(c.key)) { chosen.push(c); have.add(c.key); }
         }
       }
       const chosenKeys = new Set(chosen.map((c) => c.key));
       // Keep returning players in the slot they held, so cards don't jump around.
-      const slots = new Array(cfg.maxCards).fill(null);
+      const slots = new Array(MAX).fill(null);
       mem.prevSel[side].forEach((k, i) => { if (chosenKeys.has(k) && i < slots.length) slots[i] = k; });
       const placed = new Set(slots.filter(Boolean));
       for (const c of chosen) if (!placed.has(c.key)) { const i = slots.indexOf(null); slots[i] = c.key; placed.add(c.key); }
-      const prevSet = new Set(mem.prevSel[side]);
+      const wasShown = new Set(mem.prevSel[side]);
       mem.prevSel[side] = slots.filter(Boolean);
-      for (const k of mem.prevSel[side]) if (!prevSet.has(k)) mem.since[k] = mem.rally;
-      const byKey = Object.fromEntries(chosen.map((c) => [c.key, c]));
-      return slots.filter(Boolean).map((k) => ({ ...cardFor(byKey[k], sv, teamLeads), isNew: !prevSet.has(k) }));
+      for (const k of mem.prevSel[side]) if (!wasShown.has(k)) mem.since[k] = mem.rally;
+      const cards = slots.filter(Boolean).map((k) => ({ ...cardFor(byKey[k], sv, teamLeads), isNew: !wasShown.has(k) }));
+      // Full roster for the list layout: the carded players first (in slot order), then the rest by rank.
+      const order = new Map(mem.prevSel[side].map((k, i) => [k, i]));
+      const list = pool.slice().sort((a, b) => {
+        const ia = order.has(a.key) ? order.get(a.key) : 1e9, ib = order.has(b.key) ? order.get(b.key) : 1e9;
+        return ia - ib || rank(b) - rank(a) || (parseInt(a.p.uni, 10) || 0) - (parseInt(b.p.uni, 10) || 0);
+      }).map((c) => ({ key: c.key, uni: c.p.uni, first: c.p.first, last: c.p.last, top: order.has(c.key), starred: !!c.starred,
+        held: !!c.hold, live: !!c.pinned, stats: listStats(c.p) }));
+      return { cards, list };
     }
+
+    // The two-stat view in the list layout picks from these, by field name.
+    const listStats = (p) => ({ k: p.k, e: p.e, ta: p.ta, pct: fmtPct(p.pct), a: p.a, sa: p.sa, se: p.se, dig: p.dig,
+      bs: p.bs, ba: p.ba, tb: fmtHalf(p.tb), pts: fmtHalf(p.pts) });
 
     function matchHighs(s) {
       const all = [];
@@ -666,7 +738,8 @@
           last: serverP ? serverP.last : predicted ? predicted.last : null } : null,
         alerts: alerts(s),
         plays: mem.plays.slice(-6).reverse().map((p) => ({ text: p.text, score: p.score, alert: !!p.alert })),
-        teamCards: {}, playerCards: {}, rotation: rot,
+        teamCards: {}, playerCards: {}, players: {}, rotation: rot,
+        layout: { cards: cfg.maxCards },
         hidden: [...user.hidden].map((k) => {
           const [side, uni] = k.split(':');
           const p = s.teams[side].players.find((x) => String(x.uni) === uni);
@@ -676,7 +749,9 @@
       };
       for (const side of SIDES) {
         view.teamCards[side] = teamCards(s, side, e);
-        view.playerCards[side] = playerCards(s, side, e, highs);
+        const pc = playerCards(s, side, e, highs);
+        view.playerCards[side] = pc.cards;
+        view.players[side] = pc.list;
       }
       return view;
     }
@@ -684,17 +759,23 @@
     return {
       reset,
       update(snapshot, lines) {
+        snapshot = cleanSnapshot(snapshot);
         const index = buildNameIndex(snapshot);
         const totals = { home: teamTotals(snapshot.teams.home), away: teamTotals(snapshot.teams.away) };
         if (!mem.setStart && num(snapshot.score.home) + num(snapshot.score.away) === 0) mem.setStart = totals;
         const pointSide = trackScore(snapshot, totals);
         mem.prevTotals = totals;
         ingest(lines || [], snapshot, index, pointSide);
+        trackStats(snapshot);
         mem.setsWon = { home: num(snapshot.setsWon.home), away: num(snapshot.setsWon.away) };
         last = snapshot;
         return compute();
       },
       view() { return last ? compute() : null; },
+      // Layout: how many player cards each side shows (3 or 5). The list layout highlights that many rows.
+      setCards(n) { cfg.maxCards = n === 5 ? 5 : 3; },
+      // Auto-rotate: the next compute swaps the non-pinned cards for the best players not yet on the board.
+      rotate() { mem.rotateDue = { home: true, away: true }; },
       pass(key) { delete user.held[key]; user.passed[key] = mem.rally + cfg.passRallies; if (mem.pins.home && mem.pins.home.key === key) mem.pins.home = null; if (mem.pins.away && mem.pins.away.key === key) mem.pins.away = null; },
       hide(key) { delete user.held[key]; user.hidden.add(key); },
       // Pin button: keep a player's card on the board (live-updating) for holdMs, or until pinned again.

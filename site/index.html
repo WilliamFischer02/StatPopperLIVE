@@ -10,9 +10,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
-<link rel="stylesheet" href="/assets/board.css?v=0.3.5">
+<link rel="stylesheet" href="/assets/board.css?v=0.4.0">
 <script>window.__spbNoReader = true;</script>
-<script src="/spb.js?v=0.3.5"></script>
+<script src="/spb.js?v=0.4.0"></script>
 </head>
 <body>
 <div class="app">
@@ -21,16 +21,22 @@
     <span class="matchline" id="conn">Not linked to a stats page yet</span>
     <div class="transport">
       <button class="tbtn gold" id="starsbtn" type="button" aria-pressed="false">&#9733; Impact players</button>
-      <button class="tbtn" id="swap" type="button" title="Swap which team sits on the left">Swap sides</button>
+      <button class="tbtn" id="swap" type="button" title="Swap which team sits on the left">&#8644; Swap sides</button>
       <button class="tbtn" id="checkbtn" type="button" aria-pressed="false">Reader check</button>
-      <button class="tbtn" id="newlink" type="button" hidden>New link</button>
+      <button class="tbtn" id="newlink" type="button" hidden title="Link a different stats page">Change page</button>
       <button class="tbtn" id="fs" type="button">Full screen</button>
       <nav class="navlinks"><a href="/setup">Setup</a></nav>
     </div>
   </header>
   <div id="notice" class="notice" role="status" hidden></div>
-  <section id="picker" aria-label="Impact players" hidden></section>
   <section id="check" class="check" aria-label="Reader check" hidden></section>
+  <div id="ctlbar" class="ctlbar" hidden>
+    <span class="ctl">Cards <span class="seg" id="layoutseg" role="group" aria-label="Player card layout"><button type="button" data-layout="3" aria-pressed="true">3 per team</button><button type="button" data-layout="5" aria-pressed="false">5 per team</button><button type="button" data-layout="all" aria-pressed="false">All players</button></span></span>
+    <span class="ctl" id="liststats" hidden>Show <select id="statA" aria-label="First stat"></select> &amp; <select id="statB" aria-label="Second stat"></select></span>
+    <span class="ctl">Rotate <select id="rotate" aria-label="Auto-rotate cards" title="Swap the unpinned cards for other players this often">
+      <option value="0">Off</option><option value="15">15 s</option><option value="30">30 s</option><option value="45">45 s</option><option value="60">1 min</option><option value="90">1&frac12; min</option><option value="120">2 min</option><option value="180">3 min</option><option value="240">4 min</option><option value="300">5 min</option><option value="420">7 min</option><option value="600">10 min</option>
+    </select><span class="count" id="rotatecount"></span></span>
+  </div>
   <section id="start" class="start" aria-label="Link a stats page">
     <h1>Link a stats page</h1>
     <p class="lead">Paste the game&rsquo;s StatBroadcast link, or just its event number. This board opens the stats page in a new tab and fills in once that page shows the box score.</p>
@@ -48,7 +54,8 @@
     <p class="morelinks"><a href="/setup">Set up the reader</a><button class="linkbtn" id="practice" type="button">Try the practice page</button><a href="/replay">Replay demo</a></p>
   </section>
   <div id="board" hidden></div>
+  <section id="picker" aria-label="Impact players" hidden></section>
 </div>
-<script src="/assets/live.js?v=0.3.5"></script>
+<script src="/assets/live.js?v=0.4.0"></script>
 </body>
 </html>

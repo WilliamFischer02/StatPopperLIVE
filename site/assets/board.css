@@ -65,7 +65,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .sl-team.away { justify-content: flex-end; }
 .sl-code { font-weight: 700; font-size: 28px; letter-spacing: .04em; }
 .sl-team.home .sl-code { color: var(--home); } .sl-team.away .sl-code { color: var(--away); }
-.sl-sets { font-family: var(--font-data); font-size: 15px; color: var(--ink-2); border: 1px solid var(--rule); border-radius: 4px; padding: 0 6px; }
+.sl-sets { font-family: var(--font-data); font-size: 14px; color: var(--ink-3); border: 1px solid var(--rule); border-radius: 4px; padding: 0 6px; display: inline-flex; align-items: baseline; gap: 4px; }
+.sl-sets small { font-family: var(--font-display); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
 .sl-pts { text-align: center; font-family: var(--font-data); font-weight: 600; font-size: 30px; font-variant-numeric: tabular-nums; line-height: 1; }
 .sl-pts small { display: block; font-family: var(--font-display); font-weight: 600; font-size: 12px; letter-spacing: .14em; color: var(--ink-3); margin-top: 4px; }
 .serve { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink-2); min-height: 20px; }
@@ -107,13 +108,16 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .court .cell.unknown .nm { color: var(--ink-3); }
 .note { font-size: 12.5px; color: var(--ink-3); margin: 0; }
 
-/* ---------- team pops */
+/* ---------- team pops: one card per side, 3-5 lines, notable lines first and filler greyed */
 .tcols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .tcol { display: grid; align-content: start; gap: 8px; min-width: 0; }
-.tcard { background: var(--panel-2); border: 1px solid var(--rule); border-radius: 8px; padding: 8px 12px; display: grid; gap: 2px; min-width: 0; }
-.tcard .big { font-family: var(--font-display); font-weight: 700; font-size: 25px; line-height: 1.05; text-transform: uppercase; letter-spacing: .02em; overflow-wrap: anywhere; }
-.tcard .sub { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.tcard.is-live { border-color: var(--tally); }
+.tcard { background: var(--panel-2); border: 1px solid var(--rule); border-radius: 8px; padding: 4px 12px; display: grid; min-width: 0; }
+.tline { display: grid; gap: 1px; padding: 6px 0 5px; border-top: 1px solid var(--rule); min-width: 0; }
+.tline:first-child { border-top: 0; }
+.tline .big { font-family: var(--font-display); font-weight: 700; font-size: 22px; line-height: 1.05; text-transform: uppercase; letter-spacing: .02em; overflow-wrap: anywhere; }
+.tline .sub { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tline.is-live .big { color: var(--tally); }
+.tline.is-dim { opacity: .5; }
 .livedot { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-display); font-weight: 700; font-size: 12px; letter-spacing: .12em; color: var(--tally); text-transform: uppercase; }
 .livedot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--tally); }
 .empty { font-size: 13px; color: var(--ink-3); border: 1px dashed var(--rule); border-radius: 8px; padding: 10px 12px; }
@@ -124,6 +128,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .pcard.is-live { border-color: var(--tally); box-shadow: inset 0 0 0 1px var(--tally); }
 .pcard.is-new { animation: arrive .28s ease-out; }
 @keyframes arrive { from { transform: translateY(-4px); opacity: .35; } to { transform: none; opacity: 1; } }
+/* A number that just changed flashes once (the scoreboard "tally" cue). */
+.pv.tick .v { animation: tick .8s ease-out; }
+@keyframes tick { 0% { color: var(--amber); text-shadow: 0 0 8px var(--amber); } 100% { color: inherit; text-shadow: none; } }
+.alert.is-new { animation: pulse .7s ease-out 2; }
+@keyframes pulse { 0% { transform: scale(1); } 35% { transform: scale(1.025); filter: brightness(1.35); } 100% { transform: scale(1); } }
 .phead { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; }
 .jersey { width: 46px; height: 46px; border-radius: 6px; display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; font-size: 27px; color: #0c1014; font-variant-numeric: tabular-nums; }
 .side-home .jersey { background: var(--home); color: var(--home-ink, #0c1014); } .side-away .jersey { background: var(--away); color: var(--away-ink, #0c1014); }
@@ -132,8 +141,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .meta { margin-top: 2px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13px; color: var(--ink-2); }
 .meta .tag-serve { color: var(--amber); font-weight: 600; }
 .acts { display: flex; gap: 6px; align-self: start; }
-.abtn { background: none; border: 1px solid var(--rule); border-radius: 5px; color: var(--ink-2); padding: 3px 9px; font-size: 13px; cursor: pointer; }
+/* Card buttons stay quiet until the card is hovered or a button is on, so they never outweigh the name. */
+.abtn { background: none; border: 1px solid transparent; border-radius: 5px; color: var(--ink-3); padding: 2px 8px; font-size: 12px; cursor: pointer; }
+.abtn:hover, .pcard:hover .abtn, .pcard:focus-within .abtn, .abtn.on { color: var(--ink-2); border-color: var(--rule); }
 .abtn:hover { color: var(--ink); border-color: var(--ink-3); }
+.abtn.hide { opacity: .6; }
 .pops { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border-top: 1px solid var(--rule); padding-top: 4px; }
 .pop { display: grid; grid-template-columns: 10.5em minmax(0, 1fr); align-items: baseline; gap: 10px; padding: 1px 0; }
 .pname { font-family: var(--font-display); font-weight: 600; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
@@ -142,12 +154,38 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .pv { white-space: nowrap; }
 .pv .v { font-family: var(--font-data); font-weight: 600; font-size: 17px; }
 .pv .l { font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: .06em; color: var(--ink-3); margin-left: 4px; }
-.pop.best .pname { color: var(--ink); }
+.pop.best .pname { color: var(--ink); font-size: 17px; }
 .pop.best .pv .v { font-size: 21px; }
 /* Greyed: filler cards and options shown to keep each side full, below pop level for now. */
 .pcard.is-dim, .tcard.is-dim { opacity: .5; }
 .pcard.is-dim:hover, .pcard.is-dim:focus-within { opacity: .85; }
 .pop.dim .pname, .pop.dim .pv .v { color: var(--ink-3); }
+
+/* ---------- 5-card layout: tighter cards so five fit a side */
+.cards-5 .pcard { padding: 5px 10px 4px; gap: 3px; }
+.cards-5 .jersey { width: 38px; height: 38px; font-size: 22px; }
+.cards-5 .last { font-size: 21px; }
+.cards-5 .pop.best .pv .v { font-size: 18px; }
+.cards-5 .pv .v { font-size: 15px; }
+
+/* ---------- list layout: every player, two stats, carded players highlighted at the top */
+.plist { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.prow { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 2px 8px; border-radius: 6px; border: 1px solid transparent; color: var(--ink-2); min-width: 0; }
+.prow .jersey { width: 30px; height: 30px; font-size: 17px; border-radius: 5px; }
+.prow .last { font-size: 18px; }
+.prow .pvals { gap: 2px 12px; justify-content: flex-end; }
+.prow .pv .v { font-size: 16px; }
+.prow .abtn { padding: 1px 6px; font-size: 11px; }
+.prow.is-top { background: var(--panel-2); border-color: var(--rule); color: var(--ink); }
+.prow.is-top .last { font-size: 21px; }
+.prow.is-top .pv .v { font-size: 19px; }
+.prow.is-live { border-color: var(--tally); box-shadow: inset 0 0 0 1px var(--tally); }
+.prow.is-held { border-color: color-mix(in srgb, var(--info) 60%, var(--rule)); }
+.prow .impact { font-size: 14px; }
+
+/* ---------- freshness: the score tints amber when nothing has changed for a while, red when it has been long */
+.board.is-quiet .sl-pts { color: var(--amber); }
+.board.is-stale .sl-pts { color: var(--tally); }
 
 /* ---------- footer */
 .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: 13px; color: var(--ink-3); }
@@ -165,12 +203,26 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   .jersey { width: 46px; height: 46px; font-size: 26px; }
   .sl-code { font-size: 22px; } .sl-pts { font-size: 28px; }
 }
-@media (prefers-reduced-motion: reduce) { .pcard.is-new { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .pcard.is-new, .pv.tick .v, .alert.is-new { animation: none; } }
 
 /* Site additions: modes, impact stars, picker, link panel, reader check, setup + practice pages. */
 [hidden] { display: none !important; }
+/* Red is kept for "act now" (match point, live cards). A live link is green. */
 .mode.wait { color: #1b1204; background: var(--amber); }
 .mode.link { color: #1b1204; background: var(--info); }
+.mode.live { color: #06140b; background: #3ccf7a; }
+.mode.stale { color: #fff; background: var(--tally); }
+
+/* board controls: layout, list stats, auto-rotate */
+.ctlbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; font-size: 13px; color: var(--ink-3); }
+.ctl { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+.ctl select { font: 500 14px var(--font-body); letter-spacing: 0; text-transform: none; background: var(--panel-2); color: var(--ink); border: 1px solid var(--rule); border-radius: var(--r); padding: 4px 6px; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: var(--r); overflow: hidden; }
+.seg button { font: 600 13px var(--font-body); background: var(--panel-2); border: 0; border-left: 1px solid var(--rule); padding: 4px 10px; cursor: pointer; color: var(--ink-2); }
+.seg button:first-child { border-left: 0; }
+.seg button:hover { color: var(--ink); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
+.ctl .count { font-family: var(--font-data); font-size: 12px; letter-spacing: 0; color: var(--ink-3); font-variant-numeric: tabular-nums; min-width: 3.5em; }
 a { color: var(--info); }
 a:hover { color: var(--ink); }
 .navlinks { display: flex; gap: 14px; font-size: 14px; }

@@ -65,7 +65,7 @@
     function colHTML(col, ci) {
       const chips = col.players.map((p, i) => {
         const on = col.starred(p);
-        return `<button class="pk-chip${on ? ' on' : ''}${p.notListed ? ' faint' : ''}" data-act="pk-toggle" data-col="${ci}" data-i="${i}" aria-pressed="${on}" title="${p.notListed ? 'On the MSU roster but not listed on this stats page' : ''}">
+        return `<button class="pk-chip${on ? ' on' : ''}${p.notListed ? ' faint' : ''}" data-act="pk-toggle" data-col="${ci}" data-i="${i}" aria-pressed="${on}" title="${p.notListed ? 'On the roster, not on this page yet' : ''}">
           <span class="pk-star" aria-hidden="true">${on ? '★' : '☆'}</span><span class="pk-num">${esc(p.uni)}</span><span class="pk-name">${esc(p.last)}</span>${p.pos ? `<span class="pk-pos">${esc(p.pos)}</span>` : ''}</button>`;
       }).join('');
       const count = col.players.filter(col.starred).length;
@@ -79,7 +79,7 @@
       render(m) {
         model = m;
         host.innerHTML = `<div class="picker">
-          <div class="pk-head"><div><b>Impact players</b><p class="note">Star the players you build graphics for most. Each team with a star always keeps at least one starred player on the board. MSU picks carry over to every match.</p></div>
+          <div class="pk-head"><div><b>Impact players</b><p class="note">Star the players you pop most. A starred player always keeps a card. MSU stars carry over to every match.</p></div>
           <button class="tbtn" data-act="pk-close">Done</button></div>
           <div class="pk-cols">${m.cols.map(colHTML).join('')}</div></div>`;
       },
