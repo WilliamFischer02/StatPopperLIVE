@@ -2,6 +2,7 @@
 
 ## TL;DR
 
+- **v0.4.1 (Nov 7, 2 pm).** The in-tab "Show here" overlay has the same Cards / Show / Rotate controls; Pass lists the player in the footer with Undo; clicking any pop line or team line copies it. e2e is 38 checks.
 - **v0.4.0 (Nov 7, before the 4 pm match).** Card layouts (3 or 5 per team, or every player with two chosen stats and the top 3 highlighted), auto-rotate (Off, 15 s to 10 min) with one-stale-card swaps between rotations, one team card per team with 3–5 lines, an engine-side guard against set/match/team rows, a 100 ms reader debounce, and a polish pass from two UI reviews (glyph mode chips, green Live, quieter buttons, value-tick flash, alert pulse, freshness tint). Replay test and e2e (31 checks) pass; see the verification log in `docs/CONTEXT.md`.
 
 - The site is live at https://stat-pop-board.vercel.app. v0.2.0 went up at about 11:15 MT, v0.2.1 (Tampermonkey hardening) that afternoon, and v0.3.0 (Pin button, always-full board with greyed filler) at about 3:00 pm. Each passed the full end-to-end suite.
@@ -40,7 +41,7 @@
 
 ## Backlog (suggested order)
 
-0. **Ask William after the Nov 7 match:** which layout and rotate interval he used; whether the list's two stats should be remembered per sport; whether the in-tab "Show here" overlay needs the same controls (it uses the defaults today); and whether a Pass undo chip or click-to-copy a pop line would help (both small, from the UX review).
+0. **Ask William after the Nov 7 match:** which layout and rotate interval he used; whether the copied line format (`GREENY · Attacks & Blocks · 12 K · .350 HIT · 3 BLK`) matches what he types, or should drop the labels; whether the list's two stats should be remembered per sport.
 
 1. **Calibrate the reader with the first real Copy for Claude JSON.** Fix the title, table and console parsing, add a fixture under `test/`, and extend the mock to match.
 2. **Opponent roster positions.** Positions are bundled only for MSU. Consider a pregame paste of the opponent roster.
