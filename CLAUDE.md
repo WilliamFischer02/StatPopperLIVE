@@ -92,12 +92,16 @@ P = { uni, first, last, k, e, ta, a, sa, se, re, dig, bs, ba, be }
 - **Notability.** Each stat is scored against a par that scales with effective sets played (`vbEffSets`). So 5 kills is notable in set 1 and ordinary by set 4. A sub-par stat like "1 block" can still appear, but only greyed, as filler (see Board makeup).
 - **Pops.** Each pop is the button label William uses: Attacks, Kills, Blocks, Digs, Assists, Aces, Points, plus the combos Attacks & Blocks, Attacks & Digs, Digs & Blocks and Assists & Digs. A player card shows up to 3 pops and at least 2 when the player has 2 different stats. Options below pop level (score < 0.8) are flagged `dim` and shown greyed.
 - **Impact score.** Impact = best pop + 0.35 × second pop + recent play involvement. Boosts: pinned (the last play named the player) +100, serving streak of 3 or more +1.2, starred +0.35, already on the board +0.3.
-- **Board makeup (v0.3.0).** Each side always fills 3 player cards (as long as 3 players have a stat) and 2 team cards (1 in the first few rallies). Order: Pin-held cards, then notable or live cards by impact, then the most active remaining players as greyed filler (`dim`). A card that just arrived gets a +1.5 stickiness bonus for 4 rallies, so cards don't flicker. Cards keep their slots between updates.
+- **Board makeup (v0.4.0).** Each side fills 3 or 5 player cards (the Cards switch above the board; `setCards(n)`), as long as that many players have a stat, and one team card with 3 to 5 lines. Order: Pin-held cards, then notable or live cards by impact, then the most active remaining players as greyed filler (`dim`). Cards keep their slots between updates.
+- **Stability and swaps (v0.4.0).** Between rotations the board holds still: at most one card changes per update per side. The challenger is the best player not on the board (a player named in the last play or on a serving streak first). It replaces the *stalest* card, the one whose stat line changed longest ago (`mem.statAt`), never a pinned or live card, and a card that arrived within the last 4 rallies only for a live challenger. A filler-level challenger never swaps in.
+- **Auto-rotate (v0.4.0).** The Rotate select (Off, 15 s to 10 min; `spb:rotate`) calls `eng.rotate()` on the interval. The next compute puts players not on the board ahead of those on it (best first), so every unpinned card turns over when enough other players have a stat. Starred players come back through the star rule.
+- **Layouts (v0.4.0).** `spb:layout` is `3`, `5` or `all`. `all` lists every player on each side (`view.players[side]`, carded players first) with two chosen stats (`spb:liststats`, default Kills & Digs; options in `BoardView.LIST_STATS`) and the top 3 highlighted. The in-tab overlay in the stats tab uses the defaults (3 cards, no rotation).
 - **Pin (William's button, v0.3.0).** Keeps a player's card on the board, still updating, for 10 minutes or until he clicks Unpin. Engine API: `toggleHold(key)`, `expireHolds()`; state is `user.held`, separate from `mem.pins` (the last-play pin). Max 3 per side; a 4th releases that side's oldest. Pass and Hide release the pin. The board checks for expiry every second.
 - **Impact stars.** A starred player always gets a card on their side.
 - **Team colours (v0.3.3).** The swatch beside a team name opens the browser colour picker. The colour is stored per team (`spb:color:<teamKey>`), not per side, so it survives Swap sides and comes back the next time that team plays. Jersey ink flips to white on a dark colour.
 - **Pass and Hide.** Pass skips a player for 10 rallies. Hide removes them until they're unhidden.
-- **Team cards.** Notable: scoring runs, set hit %, team hit %, kills, blocks, aces, digs, service errors, and a set summary. Filler (greyed, always ranked below notable): team hit %, kills, blocks, digs, aces and set hit %, whenever the team has that stat.
+- **Team card (one per team, 3–5 lines).** Notable lines: scoring runs, set hit %, team hit %, kills, blocks, aces, digs, service errors, and a set summary; up to 5 show. Filler (greyed) tops the card up to 3 lines: team hit %, kills, blocks, digs, aces and set hit %, whenever the team has that stat.
+- **Summary-row guard (v0.4.0).** `cleanSnapshot` drops any player without a 1–2 digit jersey or whose name reads as a summary row (team, totals, set, game, match, opponent) before anything else runs, so even a reader slip can't put "Set 1" or "Match" on a card or into the team totals.
 - **Alerts.** Set point, match point, timeout, challenge, penalty, sub, set won and final.
 - **Rotation.** A tracker built from the serve order.
 
@@ -108,6 +112,7 @@ P = { uni, first, last, k, e, ta, a, sa, se, re, dig, bs, ba, be }
 - **Player rows only (v0.3.5).** The live page also has team-by-set tables with volleyball columns, and on Oct 17 their "Set 1 … Match" rows showed up as player cards. A table needs a `#` or `PLAYER` column to be read as a box score (others are listed in `diag.ignoredTables`). The jersey comes only from the `#` cell or the start of the name. Rows labelled team, totals, set, game, match or opponent are skipped (`diag.tables[].skipped`).
 - **Sides.** Which team a table belongs to comes from nearby captions and headings.
 - **Play lines.** A batch of 3 or fewer changed lines counts as new plays, repeats included. A bigger batch means the page redrew, so only lines never seen before count. The same text within 3 s is dropped as a duplicate.
+- **Timing.** Page mutations are debounced 100 ms (v0.4.0; was 250), with a 2 s safety tick. A changed snapshot is sent at once; an unchanged one at most every 2 s.
 
 ## Files
 
@@ -133,7 +138,8 @@ P = { uni, first, last, k, e, ta, a, sa, se, re, dig, bs, ba, be }
 - **The board reuses the `spb-stats` tab** for every new link, including the practice page. That's intended.
 - **COOP or CSP risk.** If StatBroadcast sends a COOP header, the window link between tabs can break. The fallback is the dock's "Show here" in-tab board. If the page's CSP blocks the bookmarklet's script load, the fallback is the console paste.
 - **Cache-busting.** Bump `VERSION` in `tools/build_site.py` for any change William should see. It updates every `?v=` URL and shows in Reader check, which is how you confirm he has the new reader.
-- **Copy rules.** UI copy is short, plain and operator-facing. Labels must match how William names pops in the graphics software.
+- **Copy rules.** UI copy is short, plain and operator-facing. Labels must match how William names pops in the graphics software. Icons are plain Unicode glyphs only (○ ◐ ● ‖ ▲ ★ ⇄), never emoji: Windows draws emoji in colour, which breaks the dark board. Red means "act now" (match point, live cards, a stale link); a live link is green.
+- **Freshness cues.** A value that changed since the last draw flashes once (`.pv.tick`), a new alert pulses, and the score tints amber after 90 s without a stat change in a live set and red after 4 min (`board.setFreshness`).
 
 ## Working with William
 
