@@ -21,7 +21,7 @@ args = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 args.add_argument("--check", action="store_true", help="build to a temp folder and compare with site/")
 args = args.parse_args()
 OUT = Path(tempfile.mkdtemp(prefix="spb-site-")) if args.check else SITE
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 # Where the live site is served. The reader falls back to this when nothing else tells it where the board is
 # (Tampermonkey's @require gives it no script URL), and the one-click Tampermonkey script points here.
 PROD_ORIGIN = "https://stat-pop-board.vercel.app"
@@ -142,13 +142,7 @@ write(OUT / "index.html", head("Stat Pop Board", "Second-monitor board that pull
   </header>
   <div id="notice" class="notice" role="status" hidden></div>
   <section id="check" class="check" aria-label="Reader check" hidden></section>
-  <div id="ctlbar" class="ctlbar" hidden>
-    <span class="ctl">Cards <span class="seg" id="layoutseg" role="group" aria-label="Player card layout"><button type="button" data-layout="3" aria-pressed="true">3 per team</button><button type="button" data-layout="5" aria-pressed="false">5 per team</button><button type="button" data-layout="all" aria-pressed="false">All players</button></span></span>
-    <span class="ctl" id="liststats" hidden>Show <select id="statA" aria-label="First stat"></select> &amp; <select id="statB" aria-label="Second stat"></select></span>
-    <span class="ctl">Rotate <select id="rotate" aria-label="Auto-rotate cards" title="Swap the unpinned cards for other players this often">
-      <option value="0">Off</option><option value="15">15 s</option><option value="30">30 s</option><option value="45">45 s</option><option value="60">1 min</option><option value="90">1&frac12; min</option><option value="120">2 min</option><option value="180">3 min</option><option value="240">4 min</option><option value="300">5 min</option><option value="420">7 min</option><option value="600">10 min</option>
-    </select><span class="count" id="rotatecount"></span></span>
-  </div>
+  <div id="ctlbar" class="ctlbar" aria-label="Board controls" hidden></div>
   <section id="start" class="start" aria-label="Link a stats page">
     <h1>Link a stats page</h1>
     <p class="lead">Paste the game&rsquo;s StatBroadcast link, or just its event number. This board opens the stats page in a new tab and fills in once that page shows the box score.</p>

@@ -120,6 +120,19 @@ assert.strictEqual(e2.toggleHold('home:6'), false, 'second click unpins');
 e2.hide('home:18');
 assert.deepStrictEqual(e2.view().playerCards.home.filter((c) => c.held).map((c) => c.uni), ['22']);
 
+// Pass skips a player for 10 rallies and lists them for Undo; Undo brings them straight back.
+const e7 = create({ now: () => 0 });
+let v7 = e7.update(rp.snapshot(60), []);
+const passKey = v7.playerCards.home[0].key;
+e7.pass(passKey);
+v7 = e7.view();
+assert.ok(!v7.playerCards.home.some((c) => c.key === passKey), 'passed player leaves the board');
+assert.deepStrictEqual(v7.passed.map((p) => [p.key, p.rallies]), [[passKey, 10]], 'passed player is listed with rallies left');
+e7.unpass(passKey);
+v7 = e7.view();
+assert.strictEqual(v7.passed.length, 0, 'Undo clears the pass');
+assert.ok(v7.playerCards.home.some((c) => c.key === passKey), 'player is back after Undo');
+
 // Summary rows ("Set 1", "Match", "TEAM") that slip past a reader never become cards or count in totals.
 const e3 = create({ now: () => 0 });
 const bogus = rp.snapshot(60);

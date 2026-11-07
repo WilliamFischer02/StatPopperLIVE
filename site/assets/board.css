@@ -161,6 +161,13 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .pcard.is-dim:hover, .pcard.is-dim:focus-within { opacity: .85; }
 .pop.dim .pname, .pop.dim .pv .v { color: var(--ink-3); }
 
+/* ---------- click to copy: any pop line or team line */
+.pop[data-copy], .tline[data-copy] { position: relative; cursor: copy; border-radius: 4px; transition: background .12s; }
+.pop[data-copy]:hover, .tline[data-copy]:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.pop.copied, .tline.copied { background: color-mix(in srgb, #3ccf7a 18%, transparent); }
+.copied::after { content: "Copied"; position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-family: var(--font-display); font-weight: 700; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #3ccf7a; pointer-events: none; }
+.chip.passed { border-color: color-mix(in srgb, var(--amber) 50%, var(--rule)); }
+
 /* ---------- 5-card layout: tighter cards so five fit a side */
 .cards-5 .pcard { padding: 5px 10px 4px; gap: 3px; }
 .cards-5 .jersey { width: 38px; height: 38px; font-size: 22px; }

@@ -23,6 +23,7 @@
 
   const board = BV.mountBoard($('board'), {
     pass: (k) => { eng.pass(k); rerender(); },
+    unpass: (k) => { eng.unpass(k); rerender(); },
     hold: (k) => { eng.toggleHold(k); rerender(); },
     hide: (k) => { eng.hide(k); store.set('hidden:' + eventId, eng.hiddenKeys); rerender(); },
     unhide: (k) => { eng.unhide(k); store.set('hidden:' + eventId, eng.hiddenKeys); rerender(); },
@@ -38,30 +39,16 @@
 
   // Board settings, kept in this browser: player-card layout ('3', '5' or 'all'), the two stats the list
   // layout shows, and the auto-rotate interval in seconds (0 = off).
-  const settings = { layout: String(store.get('layout', '3')), listStats: store.get('liststats', ['k', 'dig']), rotate: +store.get('rotate', 0) || 0 };
-  if (!['3', '5', 'all'].includes(settings.layout)) settings.layout = '3';
-  if (!Array.isArray(settings.listStats) || settings.listStats.length !== 2) settings.listStats = ['k', 'dig'];
   let lastRotateAt = Date.now();
+  const ctl = BV.mountControls($('ctlbar'), {
+    get: (k, d) => store.get(k, d), set: (k, v) => store.set(k, v),
+    onChange: (s, what) => { if (what === 'rotate') lastRotateAt = Date.now(); applyLayout(); rerender(); paint(); },
+  });
+  const settings = ctl.settings;
   function applyLayout() {
     eng.setCards(settings.layout === '5' ? 5 : 3);
     board.setLayout(settings.layout === 'all' ? 'list' : 'cards', settings.listStats);
-    document.querySelectorAll('#layoutseg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === settings.layout)));
-    $('liststats').hidden = settings.layout !== 'all';
   }
-  $('layoutseg').addEventListener('click', (e) => {
-    const b = e.target.closest('button[data-layout]');
-    if (!b) return;
-    settings.layout = b.dataset.layout; store.set('layout', settings.layout);
-    applyLayout(); rerender();
-  });
-  for (const id of ['statA', 'statB']) $(id).innerHTML = BV.LIST_STATS.map((x) => `<option value="${x.id}">${esc(x.label)}</option>`).join('');
-  $('statA').value = settings.listStats[0]; $('statB').value = settings.listStats[1];
-  const onStats = () => { settings.listStats = [$('statA').value, $('statB').value]; store.set('liststats', settings.listStats); applyLayout(); rerender(); };
-  $('statA').addEventListener('change', onStats);
-  $('statB').addEventListener('change', onStats);
-  $('rotate').value = String(settings.rotate);
-  if ($('rotate').value !== String(settings.rotate)) { settings.rotate = 0; $('rotate').value = '0'; }
-  $('rotate').addEventListener('change', () => { settings.rotate = +$('rotate').value || 0; store.set('rotate', settings.rotate); lastRotateAt = Date.now(); paint(); });
   applyLayout();
   function applyStars() {
     const s = oriented();
@@ -267,7 +254,7 @@
     // Freshness tint on the score: amber after 90 s without a stat change in a live set, red after 4 min.
     const quiet = now - lastChangeAt;
     board.setFreshness(view && live ? (quiet > 240000 ? 'stale' : quiet > 90000 ? 'quiet' : '') : '');
-    $('rotatecount').textContent = settings.rotate && view ? `next in ${secs(settings.rotate * 1000 - (now - lastRotateAt))} s` : '';
+    ctl.setCountdown(settings.rotate && view ? `next in ${secs(settings.rotate * 1000 - (now - lastRotateAt))} s` : '');
     $('mode').textContent = mode;
     $('mode').className = 'mode ' + cls;
     $('conn').textContent = conn;

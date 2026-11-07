@@ -356,20 +356,44 @@ function startReader(SPB) {
           <button class="tbtn" id="close">Back to stats page</button>
         </div>
       </header>
+      <div class="ctlbar" id="ctl" aria-label="Board controls"></div>
       <div id="board"></div></div></div>`;
     applyStyles(shadow, '[hidden]{display:none!important}.spb-root{height:100%;overflow:auto;background:var(--ground,#0f1317);color:var(--ink,#edf1f4);font-family:var(--font-body,system-ui,sans-serif);font-size:15px;line-height:1.35}');
     const $ = (id) => shadow.getElementById(id);
     $('close').addEventListener('click', () => setOpen(false));
     $('swap').addEventListener('click', () => { swapped = !swapped; store.set('swap', swapped); resetEngine(); tick(true); });
+    ctl = BV.mountControls($('ctl'), {
+      get: (k, d) => store.get(k, d), set: (k, v) => store.set(k, v),
+      onChange: (s, what) => { if (what === 'rotate') lastRotateAt = Date.now(); applyLayout(); inTabView = eng.view(); if (inTabView) board.render(inTabView); },
+    });
     board = BV.mountBoard($('board'), {
       pass: (k) => { eng.pass(k); board.render(eng.view()); },
+      unpass: (k) => { eng.unpass(k); board.render(eng.view()); },
       hold: (k) => { eng.toggleHold(k); board.render(eng.view()); },
       hide: (k) => { eng.hide(k); saveHidden(); board.render(eng.view()); },
       unhide: (k) => { eng.unhide(k); saveHidden(); board.render(eng.view()); },
       color: (side, hex) => { const t = teamAt(side); if (!t) return; store.set(colorKey(t), hex); applyColors(); send(true); },
     });
     applyColors();
+    applyLayout();
   }
+  // The overlay's own copy of the board settings (this tab's storage, so they are separate from the board window's).
+  let ctl = null, lastRotateAt = Date.now();
+  function applyLayout() {
+    if (!ctl) return;
+    eng.setCards(ctl.settings.layout === '5' ? 5 : 3);
+    board.setLayout(ctl.settings.layout === 'all' ? 'list' : 'cards', ctl.settings.listStats);
+  }
+  setInterval(() => {
+    if (!ctl || !state.ok) return;
+    const rot = ctl.settings.rotate;
+    ctl.setCountdown(rot ? `next in ${Math.max(0, Math.round((rot * 1000 - (Date.now() - lastRotateAt)) / 1000))} s` : '');
+    if (rot && Date.now() - lastRotateAt >= rot * 1000) {
+      eng.rotate(); lastRotateAt = Date.now();
+      inTabView = eng.view();
+      if (overlayOpen() && inTabView) board.render(inTabView);
+    }
+  }, 1000);
   function setOpen(open) {
     if (open) buildOverlay();
     if (host) host.style.display = open ? '' : 'none';
@@ -379,6 +403,7 @@ function startReader(SPB) {
   }
   function resetEngine() {
     eng = PE.create(); eng.setHidden(store.get('hidden:' + eventId, [])); lastHash = ''; engLineId = lineSeq;
+    applyLayout(); lastRotateAt = Date.now();
   }
   D('here').addEventListener('click', () => setOpen(!overlayOpen()));
   document.addEventListener('keydown', (e) => {

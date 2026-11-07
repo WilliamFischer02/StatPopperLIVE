@@ -157,6 +157,27 @@ with sync_playwright() as p:
     board.click(f".q-away .pcard[data-key='{pin_key}'] button[data-act=hold]")
     board.wait_for_timeout(200)
     check(board.evaluate("document.querySelectorAll('.pcard.is-held').length") == 0, "Unpin releases the card")
+    # Pass shows an Undo chip in the footer; Undo brings the player straight back.
+    pass_key = board.evaluate("document.querySelector('.q-home .pcard:not(.is-star)').dataset.key")
+    board.click(f".q-home .pcard[data-key='{pass_key}'] button[data-act=pass]")
+    board.wait_for_timeout(200)
+    chip = board.evaluate("(() => { const c = document.querySelector('.foot .chip.passed'); return c ? c.textContent : ''; })()")
+    gone = board.evaluate(f"!document.querySelector(\".q-home .pcard[data-key='{pass_key}']\")")
+    check(gone and "Undo" in chip, f"Pass removes the card and offers Undo ({chip!r})")
+    board.click(f".foot .chip.passed button[data-act=unpass][data-key='{pass_key}']")
+    board.wait_for_timeout(200)
+    check(board.evaluate(f"!!document.querySelector(\".q-home .pcard[data-key='{pass_key}']\") && !document.querySelector('.foot .chip.passed')"), "Undo brings the passed player back")
+    # Click a pop line to copy it (the clipboard is stubbed to a window variable here).
+    board.evaluate("navigator.clipboard.writeText = (t) => { window.__copied = t; return Promise.resolve(); }")
+    first_pop = board.evaluate("(() => { const li = document.querySelector('.q-home .pcard .pop[data-copy]'); return li ? li.dataset.copy : ''; })()")
+    board.click(".q-home .pcard .pop[data-copy]")
+    board.wait_for_timeout(150)
+    copied = board.evaluate("window.__copied || ''")
+    marked = board.evaluate("!!document.querySelector('.q-home .pcard .pop.copied')")
+    check(copied == first_pop and marked and re.match(r"^[A-Z' .-]+ · .+ · \d", copied or ""), f"click copies the pop line ({copied!r})")
+    board.click(".tcol.side-home .tline[data-copy]")
+    board.wait_for_timeout(150)
+    check(board.evaluate("window.__copied") == board.evaluate("document.querySelector('.tcol.side-home .tline[data-copy]').dataset.copy"), "click copies a team line")
     board.screenshot(path=str(SHOTS / "e2e-board.png"))
 
     # 3. Stats tab reload: the reader restarts and the board relinks by itself.
@@ -183,6 +204,21 @@ with sync_playwright() as p:
     bw.wait_for_timeout(1500)
     s5 = board_state(bw)
     check(s5["mode"] == "Live", f"Open board from the stats tab links the new window ({s5['mode']})")
+    # The in-tab "Show here" overlay has the same controls: 5 per team, all players, rotate.
+    st2.locator("#spb-dock").locator("#here").click()
+    st2.wait_for_timeout(400)
+    ov = "document.getElementById('spb-host').shadowRoot"
+    check(st2.evaluate(f"{ov}.querySelectorAll('.q-home .pcard').length") == 3 and st2.evaluate(f"!!{ov}.querySelector('#layoutseg')"), "overlay opens with 3 cards and the controls")
+    st2.evaluate(f"{ov}.querySelector(\"#layoutseg button[data-layout='5']\").click()")
+    st2.wait_for_timeout(300)
+    check(st2.evaluate(f"{ov}.querySelectorAll('.q-home .pcard').length") == 5, "overlay switches to 5 per team")
+    st2.evaluate(f"{ov}.querySelector(\"#layoutseg button[data-layout='all']\").click()")
+    st2.wait_for_timeout(300)
+    check(st2.evaluate(f"{ov}.querySelectorAll('.q-home .prow.is-top').length") == 3 and st2.evaluate(f"{ov}.querySelectorAll('.q-home .prow').length") >= 14, "overlay shows the full list")
+    st2.evaluate(f"(() => {{ const s = {ov}.querySelector('#rotate'); s.value = '15'; s.dispatchEvent(new Event('change')); }})()")
+    st2.wait_for_timeout(1200)
+    check("next in" in st2.evaluate(f"{ov}.querySelector('#rotatecount').textContent"), "overlay rotate interval counts down")
+    st2.evaluate(f"{ov}.querySelector(\"#layoutseg button[data-layout='3']\").click()")
 
     # 5. Practice page through the board (reader starts by itself there).
     # The board reuses its stats tab for a new link, so the practice page loads in that same tab.

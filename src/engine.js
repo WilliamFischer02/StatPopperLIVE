@@ -237,7 +237,8 @@
     const cfg = { pops: VB_POPS, maxCards: 3, maxPops: 3, minPops: 2, minTeamLines: 3, maxTeamLines: 5, passRallies: 10,
       holdMs: 10 * 60 * 1000, dwellRallies: 4 };
     // held: cards William pinned with the Pin button, key -> { since, until } in clock ms.
-    const user = { hidden: new Set(), passed: {}, stars: { home: [], away: [] }, held: {} };
+    // restore: a player whose Pass was just undone; they come straight back on the next compute.
+    const user = { hidden: new Set(), passed: {}, stars: { home: [], away: [] }, held: {}, restore: null };
     let mem, last;
     const freshServe = () => ({ side: null, uni: null, streak: 0, turns: { home: [], away: [] }, lastTurnSide: null });
 
@@ -596,7 +597,7 @@
         chosen = held.slice();
         for (const k of prevKeys) if (chosen.length < MAX && !chosen.some((c) => c.key === k)) chosen.push(byKey[k]);
         const inSet = new Set(chosen.map((c) => c.key));
-        const isUrgent = (c) => c.pinned || c.serving;
+        const isUrgent = (c) => c.pinned || c.serving || c.key === user.restore;
         const challengers = pool.filter((c) => !inSet.has(c.key) && !c.hold && worth(c))
           .sort((a, b) => (isUrgent(b) - isUrgent(a)) || rank(b) - rank(a));
         while (chosen.length < MAX && challengers.length) chosen.push(challengers.shift());
@@ -628,6 +629,7 @@
           if (!have.has(c.key)) { chosen.push(c); have.add(c.key); }
         }
       }
+      if (user.restore && user.restore.split(':')[0] === side) user.restore = null;
       const chosenKeys = new Set(chosen.map((c) => c.key));
       // Keep returning players in the slot they held, so cards don't jump around.
       const slots = new Array(MAX).fill(null);
@@ -745,6 +747,12 @@
           const p = s.teams[side].players.find((x) => String(x.uni) === uni);
           return { key: k, side, uni, last: p ? p.last : '#' + uni };
         }),
+        // Players skipped with Pass and still skipped, so the board can offer an Undo.
+        passed: Object.keys(user.passed).filter((k) => user.passed[k] > mem.rally && !user.hidden.has(k)).map((k) => {
+          const [side, uni] = k.split(':');
+          const p = s.teams[side] && s.teams[side].players.find((x) => String(x.uni) === uni);
+          return { key: k, side, uni, last: p ? p.last : '#' + uni, rallies: user.passed[k] - mem.rally };
+        }),
         effSets: Math.round(e * 100) / 100,
       };
       for (const side of SIDES) {
@@ -777,6 +785,7 @@
       // Auto-rotate: the next compute swaps the non-pinned cards for the best players not yet on the board.
       rotate() { mem.rotateDue = { home: true, away: true }; },
       pass(key) { delete user.held[key]; user.passed[key] = mem.rally + cfg.passRallies; if (mem.pins.home && mem.pins.home.key === key) mem.pins.home = null; if (mem.pins.away && mem.pins.away.key === key) mem.pins.away = null; },
+      unpass(key) { delete user.passed[key]; user.restore = key; },
       hide(key) { delete user.held[key]; user.hidden.add(key); },
       // Pin button: keep a player's card on the board (live-updating) for holdMs, or until pinned again.
       // Each side holds at most maxCards pins; pinning one more releases that side's oldest.
