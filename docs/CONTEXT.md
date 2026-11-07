@@ -225,6 +225,15 @@ The paste-a-link flow gives the same experience, and the data never leaves Willi
 
 ---
 
+**D15. v0.4.0: layouts, auto-rotate, one team card (Nov 7, 1–3 pm, before a 4 pm match).** William's asks and how each was read:
+- **"3 player cards each, 5 each, and a full list with the top 3 highlighted showing only 2 stats."** A Cards switch above the board (3 per team / 5 per team / All players). The list shows every player the page lists (including 0-0 rows), carded players first, with two stat selects (default Kills & Digs). `cfg.maxCards` is 3 or 5; the list highlights `maxCards` rows.
+- **"Auto-rotate at a settable pace, 15 s to 10 min, but between rotations only swap the most stale card when an off-board player does something."** A Rotate select (Off, 15 s … 10 min, stepped, not free text, so it reads at a glance). `rotate()` marks the next compute; players not on the board rank ahead of those on it, so all unpinned cards turn over when enough players have a stat ("rotates all the cards", taken literally; starred players come back via the star rule). Between rotations: incumbents stay, one swap per update per side, the victim is the stalest card by `statAt` then `since`, pinned and live (last play, serving streak) cards are never victims, and a just-arrived card is protected unless the challenger is live. A filler-level challenger never swaps in. Idaho replay churn: 69 of 137 rallies (was 63; the extra is early-match filler slots filling with notable players).
+- **"Each team stat card displays 3–5 actually relevant statistics and filters out the irrelevant."** One card per team: up to 5 notable lines, greyed filler only to reach 3. Pre-match: three zero lines.
+- **"Confirm it will no longer show match or set stats where the player cards appear."** The reader fix (v0.3.5) stands and is covered by the mock; v0.4.0 adds `cleanSnapshot` in the engine so a summary row can never become a card or inflate totals, with a replay-test case that feeds "Set 1", "Match" and "TEAM" rows through.
+- **"Update more responsively."** Reader debounce 250 → 100 ms. The board already renders on every changed message. End-to-end is still bounded by StatBroadcast's own delay.
+- **Polish (two review agents).** Taken: glyph mode chips (○ ◐ ● ‖ ▲), green Live (red reserved for act-now), quieter card buttons with Hide dimmer, "● Pinned" on the button with minutes left in the tooltip, value-tick flash, alert pulse, freshness tint, sets-won label, shorter status/notice/dock/picker copy, "Change page", picker below the board. Taken in v0.4.1 (William said there was time): overlay controls, a Pass undo chip, click-to-copy a pop line. Not taken: a full-width crit alert band, hiding setup buttons while live.
+- **Deploy.** Pushed to `main` within 2 hours of the broadcast because William asked for it to be ready for the 4 pm match; v0.3.5 (`dpl_CfWWf8F8ZVV6cXacwjR16zcYVuxf`) is the rollback.
+
 ## 6. Architecture quick reference
 
 The full version is in `CLAUDE.md`. Summary:

@@ -21,7 +21,7 @@ args = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 args.add_argument("--check", action="store_true", help="build to a temp folder and compare with site/")
 args = args.parse_args()
 OUT = Path(tempfile.mkdtemp(prefix="spb-site-")) if args.check else SITE
-VERSION = "0.3.5"
+VERSION = "0.4.1"
 # Where the live site is served. The reader falls back to this when nothing else tells it where the board is
 # (Tampermonkey's @require gives it no script URL), and the one-click Tampermonkey script points here.
 PROD_ORIGIN = "https://stat-pop-board.vercel.app"
@@ -133,16 +133,16 @@ write(OUT / "index.html", head("Stat Pop Board", "Second-monitor board that pull
     <span class="matchline" id="conn">Not linked to a stats page yet</span>
     <div class="transport">
       <button class="tbtn gold" id="starsbtn" type="button" aria-pressed="false">&#9733; Impact players</button>
-      <button class="tbtn" id="swap" type="button" title="Swap which team sits on the left">Swap sides</button>
+      <button class="tbtn" id="swap" type="button" title="Swap which team sits on the left">&#8644; Swap sides</button>
       <button class="tbtn" id="checkbtn" type="button" aria-pressed="false">Reader check</button>
-      <button class="tbtn" id="newlink" type="button" hidden>New link</button>
+      <button class="tbtn" id="newlink" type="button" hidden title="Link a different stats page">Change page</button>
       <button class="tbtn" id="fs" type="button">Full screen</button>
       <nav class="navlinks"><a href="/setup">Setup</a></nav>
     </div>
   </header>
   <div id="notice" class="notice" role="status" hidden></div>
-  <section id="picker" aria-label="Impact players" hidden></section>
   <section id="check" class="check" aria-label="Reader check" hidden></section>
+  <div id="ctlbar" class="ctlbar" aria-label="Board controls" hidden></div>
   <section id="start" class="start" aria-label="Link a stats page">
     <h1>Link a stats page</h1>
     <p class="lead">Paste the game&rsquo;s StatBroadcast link, or just its event number. This board opens the stats page in a new tab and fills in once that page shows the box score.</p>
@@ -160,6 +160,7 @@ write(OUT / "index.html", head("Stat Pop Board", "Second-monitor board that pull
     <p class="morelinks"><a href="/setup">Set up the reader</a><button class="linkbtn" id="practice" type="button">Try the practice page</button><a href="/replay">Replay demo</a></p>
   </section>
   <div id="board" hidden></div>
+  <section id="picker" aria-label="Impact players" hidden></section>
 </div>
 <script src="/assets/live.js?v={VERSION}"></script>
 </body>

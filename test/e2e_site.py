@@ -60,7 +60,7 @@ def check(cond, msg):
 
 def board_state(pg):
     return pg.evaluate("""() => ({
-      mode: document.getElementById('mode').textContent,
+      mode: document.getElementById('mode').textContent.replace(/^[^A-Za-z]+/, ''),
       conn: document.getElementById('conn').textContent,
       home: [...document.querySelectorAll('.q-home .pcard')].map(c => (c.classList.contains('is-star') ? '*' : '') + c.querySelector('.last').textContent),
       away: [...document.querySelectorAll('.q-away .pcard')].map(c => (c.classList.contains('is-star') ? '*' : '') + c.querySelector('.last').textContent),
@@ -102,7 +102,7 @@ with sync_playwright() as p:
     # The mock's team-by-set tables (Set 1, Set 2, Match) and TEAM rows must never become player cards.
     roster = stats.evaluate("[document.querySelectorAll('#t-home tbody tr').length - 2, document.querySelectorAll('#t-away tbody tr').length - 1]")
     summary = [x for x in s1["home"] + s1["away"] if re.match(r"^(set|match|team|totals?|\d+)\b", x, re.I)]
-    check(not summary and f"reading {roster[0]} + {roster[1]} players" in dock,
+    check(not summary and f"{roster[0]} + {roster[1]} players" in dock,
           f"set, match and team rows are not read as players ({summary or dock}; expected {roster[0]} + {roster[1]})")
 
     # 2. Impact players: star Greeny (MSU) and Armstrong (UI) from the picker.
@@ -130,14 +130,54 @@ with sync_playwright() as p:
     print("  ", s3)
     check(any(x.startswith("*") for x in s3["home"]), "star rule holds as the set goes on")
     check(any("Run" in t for t in s3["team"]), "team scoring-run card shows during MSU's run")
-    pinned = board.evaluate(f"(() => {{ const c = document.querySelector(\".q-away .pcard[data-key='{pin_key}']\"); return c ? [c.classList.contains('is-held'), c.querySelector('.held') ? c.querySelector('.held').textContent : ''] : null; }})()")
-    check(bool(pinned and pinned[0] and pinned[1].startswith("Pinned")), f"pinned card stays on the board ({pin_key}: {pinned})")
-    counts = board.evaluate("['home', 'away'].map(s => [document.querySelectorAll('.q-' + s + ' .pcard').length, document.querySelectorAll('.tcol.side-' + s + ' .tcard').length])")
-    check(counts == [[3, 2], [3, 2]], f"each side shows 3 player cards and 2 team cards ({counts})")
+    pinned = board.evaluate(f"(() => {{ const c = document.querySelector(\".q-away .pcard[data-key='{pin_key}']\"); const b = c && c.querySelector('button[data-act=hold]'); return c ? [c.classList.contains('is-held'), b ? b.textContent : ''] : null; }})()")
+    check(bool(pinned and pinned[0] and "Pinned" in pinned[1]), f"pinned card stays on the board ({pin_key}: {pinned})")
+    counts = board.evaluate("['home', 'away'].map(s => [document.querySelectorAll('.q-' + s + ' .pcard').length, document.querySelectorAll('.tcol.side-' + s + ' .tcard').length, document.querySelectorAll('.tcol.side-' + s + ' .tline').length])")
+    check(all(c[0] == 3 and c[1] == 1 and 3 <= c[2] <= 5 for c in counts), f"each side shows 3 player cards and 1 team card with 3-5 lines ({counts})")
+    # Layouts: 5 cards per side, then the full list with the top 3 highlighted and two chosen stats.
+    board.click("#layoutseg button[data-layout='5']")
+    board.wait_for_timeout(200)
+    five = board.evaluate("['home', 'away'].map(s => document.querySelectorAll('.q-' + s + ' .pcard').length)")
+    check(five == [5, 5], f"5-per-team layout shows 5 cards per side ({five})")
+    board.click("#layoutseg button[data-layout='all']")
+    board.select_option("#statA", "tb")
+    board.select_option("#statB", "sa")
+    board.wait_for_timeout(200)
+    lst = board.evaluate("['home', 'away'].map(s => [document.querySelectorAll('.q-' + s + ' .prow').length, document.querySelectorAll('.q-' + s + ' .prow.is-top').length, [...document.querySelectorAll('.q-' + s + ' .prow:first-child .pv .l')].map(e => e.textContent).join('+')])")
+    check(lst[0][0] >= roster[0] and lst[1][0] >= roster[1] and lst[0][1] == 3 and lst[1][1] == 3 and lst[0][2] == 'BLK+ACE',
+          f"full list shows every player with the top 3 highlighted and the chosen two stats ({lst}; roster {roster})")
+    check(board.evaluate("JSON.parse(localStorage.getItem('spb:layout'))") == "all" and board.evaluate("JSON.parse(localStorage.getItem('spb:liststats'))") == ["tb", "sa"], "layout and list stats are remembered")
+    board.select_option("#rotate", "15")
+    board.wait_for_timeout(100)
+    check(board.evaluate("JSON.parse(localStorage.getItem('spb:rotate'))") == 15 and "next in" in board.evaluate("document.getElementById('rotatecount').textContent"), "auto-rotate interval is remembered and counts down")
+    board.select_option("#rotate", "0")
+    board.click("#layoutseg button[data-layout='3']")
+    board.wait_for_timeout(200)
     print("   greyed cards:", board.evaluate("document.querySelectorAll('.pcard.is-dim, .tcard.is-dim').length"))
     board.click(f".q-away .pcard[data-key='{pin_key}'] button[data-act=hold]")
     board.wait_for_timeout(200)
     check(board.evaluate("document.querySelectorAll('.pcard.is-held').length") == 0, "Unpin releases the card")
+    # Pass shows an Undo chip in the footer; Undo brings the player straight back.
+    pass_key = board.evaluate("document.querySelector('.q-home .pcard:not(.is-star)').dataset.key")
+    board.click(f".q-home .pcard[data-key='{pass_key}'] button[data-act=pass]")
+    board.wait_for_timeout(200)
+    chip = board.evaluate("(() => { const c = document.querySelector('.foot .chip.passed'); return c ? c.textContent : ''; })()")
+    gone = board.evaluate(f"!document.querySelector(\".q-home .pcard[data-key='{pass_key}']\")")
+    check(gone and "Undo" in chip, f"Pass removes the card and offers Undo ({chip!r})")
+    board.click(f".foot .chip.passed button[data-act=unpass][data-key='{pass_key}']")
+    board.wait_for_timeout(200)
+    check(board.evaluate(f"!!document.querySelector(\".q-home .pcard[data-key='{pass_key}']\") && !document.querySelector('.foot .chip.passed')"), "Undo brings the passed player back")
+    # Click a pop line to copy it (the clipboard is stubbed to a window variable here).
+    board.evaluate("navigator.clipboard.writeText = (t) => { window.__copied = t; return Promise.resolve(); }")
+    first_pop = board.evaluate("(() => { const li = document.querySelector('.q-home .pcard .pop[data-copy]'); return li ? li.dataset.copy : ''; })()")
+    board.click(".q-home .pcard .pop[data-copy]")
+    board.wait_for_timeout(150)
+    copied = board.evaluate("window.__copied || ''")
+    marked = board.evaluate("!!document.querySelector('.q-home .pcard .pop.copied')")
+    check(copied == first_pop and marked and re.match(r"^[A-Z' .-]+ · .+ · \d", copied or ""), f"click copies the pop line ({copied!r})")
+    board.click(".tcol.side-home .tline[data-copy]")
+    board.wait_for_timeout(150)
+    check(board.evaluate("window.__copied") == board.evaluate("document.querySelector('.tcol.side-home .tline[data-copy]').dataset.copy"), "click copies a team line")
     board.screenshot(path=str(SHOTS / "e2e-board.png"))
 
     # 3. Stats tab reload: the reader restarts and the board relinks by itself.
@@ -164,6 +204,21 @@ with sync_playwright() as p:
     bw.wait_for_timeout(1500)
     s5 = board_state(bw)
     check(s5["mode"] == "Live", f"Open board from the stats tab links the new window ({s5['mode']})")
+    # The in-tab "Show here" overlay has the same controls: 5 per team, all players, rotate.
+    st2.locator("#spb-dock").locator("#here").click()
+    st2.wait_for_timeout(400)
+    ov = "document.getElementById('spb-host').shadowRoot"
+    check(st2.evaluate(f"{ov}.querySelectorAll('.q-home .pcard').length") == 3 and st2.evaluate(f"!!{ov}.querySelector('#layoutseg')"), "overlay opens with 3 cards and the controls")
+    st2.evaluate(f"{ov}.querySelector(\"#layoutseg button[data-layout='5']\").click()")
+    st2.wait_for_timeout(300)
+    check(st2.evaluate(f"{ov}.querySelectorAll('.q-home .pcard').length") == 5, "overlay switches to 5 per team")
+    st2.evaluate(f"{ov}.querySelector(\"#layoutseg button[data-layout='all']\").click()")
+    st2.wait_for_timeout(300)
+    check(st2.evaluate(f"{ov}.querySelectorAll('.q-home .prow.is-top').length") == 3 and st2.evaluate(f"{ov}.querySelectorAll('.q-home .prow').length") >= 14, "overlay shows the full list")
+    st2.evaluate(f"(() => {{ const s = {ov}.querySelector('#rotate'); s.value = '15'; s.dispatchEvent(new Event('change')); }})()")
+    st2.wait_for_timeout(1200)
+    check("next in" in st2.evaluate(f"{ov}.querySelector('#rotatecount').textContent"), "overlay rotate interval counts down")
+    st2.evaluate(f"{ov}.querySelector(\"#layoutseg button[data-layout='3']\").click()")
 
     # 5. Practice page through the board (reader starts by itself there).
     # The board reuses its stats tab for a new link, so the practice page loads in that same tab.

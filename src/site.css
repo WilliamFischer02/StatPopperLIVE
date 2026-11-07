@@ -1,7 +1,21 @@
 /* Site additions: modes, impact stars, picker, link panel, reader check, setup + practice pages. */
 [hidden] { display: none !important; }
+/* Red is kept for "act now" (match point, live cards). A live link is green. */
 .mode.wait { color: #1b1204; background: var(--amber); }
 .mode.link { color: #1b1204; background: var(--info); }
+.mode.live { color: #06140b; background: #3ccf7a; }
+.mode.stale { color: #fff; background: var(--tally); }
+
+/* board controls: layout, list stats, auto-rotate */
+.ctlbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; font-size: 13px; color: var(--ink-3); }
+.ctl { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+.ctl select { font: 500 14px var(--font-body); letter-spacing: 0; text-transform: none; background: var(--panel-2); color: var(--ink); border: 1px solid var(--rule); border-radius: var(--r); padding: 4px 6px; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: var(--r); overflow: hidden; }
+.seg button { font: 600 13px var(--font-body); background: var(--panel-2); border: 0; border-left: 1px solid var(--rule); padding: 4px 10px; cursor: pointer; color: var(--ink-2); }
+.seg button:first-child { border-left: 0; }
+.seg button:hover { color: var(--ink); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
+.ctl .count { font-family: var(--font-data); font-size: 12px; letter-spacing: 0; color: var(--ink-3); font-variant-numeric: tabular-nums; min-width: 3.5em; }
 a { color: var(--info); }
 a:hover { color: var(--ink); }
 .navlinks { display: flex; gap: 14px; font-size: 14px; }

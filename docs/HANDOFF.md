@@ -1,6 +1,9 @@
-# Handoff: status as of 2026-10-17, after the first live match (v0.3.5)
+# Handoff: status as of 2026-11-07 (v0.4.0)
 
 ## TL;DR
+
+- **v0.4.1 (Nov 7, 2 pm).** The in-tab "Show here" overlay has the same Cards / Show / Rotate controls; Pass lists the player in the footer with Undo; clicking any pop line or team line copies it. e2e is 38 checks.
+- **v0.4.0 (Nov 7, before the 4 pm match).** Card layouts (3 or 5 per team, or every player with two chosen stats and the top 3 highlighted), auto-rotate (Off, 15 s to 10 min) with one-stale-card swaps between rotations, one team card per team with 3–5 lines, an engine-side guard against set/match/team rows, a 100 ms reader debounce, and a polish pass from two UI reviews (glyph mode chips, green Live, quieter buttons, value-tick flash, alert pulse, freshness tint). Replay test and e2e (31 checks) pass; see the verification log in `docs/CONTEXT.md`.
 
 - The site is live at https://stat-pop-board.vercel.app. v0.2.0 went up at about 11:15 MT, v0.2.1 (Tampermonkey hardening) that afternoon, and v0.3.0 (Pin button, always-full board with greyed filler) at about 3:00 pm. Each passed the full end-to-end suite.
 - Source of truth: the GitHub repo `WilliamFischer02/StatPopperLIVE`. The full decision log and research are in `docs/CONTEXT.md`.
@@ -16,6 +19,7 @@
 | Oct 17 (morning) | Moved to Vercel. Both pages run on one computer, and Tampermonkey may not be allowed on the work machine. Added the board page with paste-a-link (an event ID or URL opens the stats tab), the bookmarklet and console starters, `/setup`, `/practice`, impact-player stars (MSU roster preloaded, MSU stars kept across matches, opponents keyed by team code), a per-event engine reset, and Reader check with "Copy for Claude". Deployed v0.2.0. |
 | Oct 17 (afternoon) | v0.2.1: one-click Tampermonkey install that pulls the reader through `@require` and updates itself; setup steps for Chrome 138+ (Allow User Scripts) and older Chrome/Edge (Developer mode); a pre-game test on a finished real match; the board warns about an outdated reader. Repo pushed to StatPopperLIVE. |
 | Oct 17 (3 pm) | v0.3.0, PR from `feat/pin-team-stats-fill`. William saw cards pop in and out on the practice page, and team pops that were almost only runs. Added: **Pin** on each player card (10 minutes or until Unpin, still updating); each side always fills 3 player cards and 2 team cards (team hit %, kills, blocks, digs, aces and set hit % as filler); at least 2 options per card; filler cards and options greyed until they reach pop level; a 4-rally stickiness bonus for new cards. On the Idaho replay, cards gone within 2 rallies of arriving fell from 56 to 24. Also: the build and e2e test now run on Windows (LF output, UTF-8 reads, `.gitattributes`). |
+| Nov 7 (1–3 pm) | v0.4.0, branch `feat/layouts-rotation`. William asked for 3 / 5 / all-players layouts, a settable auto-rotate that still swaps in a player who just did something, one relevant team card per team, a responsiveness pass and a UI polish pass, all before a 4 pm match. Two review agents (UI copy and layout; UX flow) produced the polish list; the items taken are in the commit message. Deployed to production through the Vercel API (the repo is still not linked). |
 | Oct 17 (evening) | First live match. Jarvis Prime (William's monitoring agent) shipped v0.3.1 (read the live headers `S # PLAYER K E TA HIT% AS SA DG BL`), v0.3.2 (greyed pre-match preview), v0.3.3 (team colours) and v0.3.4 (StatBroadcast's `[Paused]` title). After the match William reported set and match stats among the player cards, which he had to Hide and Pass repeatedly. v0.3.5: the reader reads only tables with a `#` or `PLAYER` column, takes the jersey only from the `#` cell, and skips team, totals, set and match rows. The mock now uses the live headers, a TEAM row and a team-by-set table, and the e2e test checks for it (26 checks). |
 
 ## Decisions (don't reopen without William)
@@ -24,7 +28,8 @@
 - **The reader runs in the user's tab and hands off to the board with `postMessage`.** Both windows must be on the same computer.
 - **The bookmarklet is the main way to start the reader** on the work computer. Console paste and Tampermonkey are fallbacks.
 - **Volleyball first.** Basketball and football come later.
-- **Full board with greyed filler (v0.3.0, William's call).** Each side always shows 3 player cards and 2 team cards, even when a stat is minor; minor ones are greyed rather than hidden. This replaces the Oct 10 "never show 1 block" rule.
+- **Full board with greyed filler (v0.3.0, William's call).** Each side always shows its player cards (3 or 5 since v0.4.0) and a team card, even when a stat is minor; minor ones are greyed rather than hidden. This replaces the Oct 10 "never show 1 block" rule.
+- **Hold still between rotations (v0.4.0, William's call).** Only the stalest card is swapped out when an off-board player does something notable, one per update; the whole set turns over only on the auto-rotate interval.
 - **Dark board, typed-pop wording.** Pop names match William's graphics software buttons, and he types team stats ("4-0 Scoring Run", "Team Hit% 0.327", "28 Team Blocks") himself, using the board's team cards as suggestions.
 
 ## Unverified and at risk
@@ -35,6 +40,8 @@
 - [ ] **Accept & Continue.** The terms prompt must be accepted before the box score renders. The reader waits and shows a message in the meantime.
 
 ## Backlog (suggested order)
+
+0. **Ask William after the Nov 7 match:** which layout and rotate interval he used; whether the copied line format (`GREENY · Attacks & Blocks · 12 K · .350 HIT · 3 BLK`) matches what he types, or should drop the labels; whether the list's two stats should be remembered per sport.
 
 1. **Calibrate the reader with the first real Copy for Claude JSON.** Fix the title, table and console parsing, add a fixture under `test/`, and extend the mock to match.
 2. **Opponent roster positions.** Positions are bundled only for MSU. Consider a pregame paste of the opponent roster.

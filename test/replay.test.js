@@ -63,7 +63,7 @@ for (let n = 0; n <= rp.total; n++) {
       assert.strictEqual(cards.length, Math.min(3, roster), `rally ${n} ${side}: ${cards.length} preview cards, ${roster} on the roster`);
       for (const c of cards) assert.ok(c.dim && c.pops.length === 0, `rally ${n} ${c.last}: preview card is greyed with no options`);
       const tcs = view.teamCards[side];
-      assert.ok(tcs.length === 2 && tcs.every((c) => c.dim), `rally ${n} ${side}: ${tcs.length} greyed team cards before first serve`);
+      assert.ok(tcs.length >= 2 && tcs.length <= 5 && tcs.every((c) => c.dim), `rally ${n} ${side}: ${tcs.length} greyed team lines before first serve`);
     } else {
       const withStats = snap.teams[side].players.filter((p) => ['k', 'a', 'sa', 'dig', 'bs', 'ba'].some((f) => +p[f] > 0)).length;
       // Each side always fills its 3 player cards, as long as 3 players have any stat.
@@ -73,10 +73,18 @@ for (let n = 0; n <= rp.total; n++) {
     }
     // Greyed cards carry no live or pinned reason.
     for (const c of cards) if (c.dim) assert.ok(!c.held && !(c.tag && c.tag.kind === 'live'), `rally ${n} ${c.last}: greyed card is live or pinned`);
-    // Team cards: at least 1 once the team has a kill, and 2 once the match is a few rallies old.
+    // Team card lines: at least 1 once the team has a kill, and 3 to 5 once the match is a few rallies old.
     const tk = snap.teams[side].players.reduce((a, p) => a + (+p.k || 0), 0);
     const tc = view.teamCards[side].length;
-    if (tk > 0) assert.ok(n > 10 ? tc === 2 : tc >= 1, `rally ${n} ${side}: ${tc} team cards`);
+    if (tk > 0) assert.ok(n > 10 ? tc >= 3 && tc <= 5 : tc >= 1, `rally ${n} ${side}: ${tc} team lines`);
+    // Never more than 5 lines, and notable lines always rank above greyed filler.
+    assert.ok(tc <= 5, `rally ${n} ${side}: ${tc} team lines`);
+    const firstDim = view.teamCards[side].findIndex((c) => c.dim);
+    if (firstDim >= 0) assert.ok(view.teamCards[side].slice(firstDim).every((c) => c.dim), `rally ${n} ${side}: filler above a notable team line`);
+    // The roster list covers every player with a card, carded players first.
+    const list = view.players[side];
+    assert.ok(cards.every((c, i) => list[i] && list[i].key === c.key && list[i].top), `rally ${n} ${side}: list does not lead with the cards`);
+    assert.ok(list.slice(cards.length).every((r) => !r.top), `rally ${n} ${side}: extra top rows`);
   }
 
   const keys = ['home', 'away'].map((s) => view.playerCards[s].map((c) => c.key).sort().join(',')).join('|');
@@ -111,6 +119,59 @@ assert.deepStrictEqual(v2.playerCards.home.filter((c) => c.held).map((c) => c.un
 assert.strictEqual(e2.toggleHold('home:6'), false, 'second click unpins');
 e2.hide('home:18');
 assert.deepStrictEqual(e2.view().playerCards.home.filter((c) => c.held).map((c) => c.uni), ['22']);
+
+// Pass skips a player for 10 rallies and lists them for Undo; Undo brings them straight back.
+const e7 = create({ now: () => 0 });
+let v7 = e7.update(rp.snapshot(60), []);
+const passKey = v7.playerCards.home[0].key;
+e7.pass(passKey);
+v7 = e7.view();
+assert.ok(!v7.playerCards.home.some((c) => c.key === passKey), 'passed player leaves the board');
+assert.deepStrictEqual(v7.passed.map((p) => [p.key, p.rallies]), [[passKey, 10]], 'passed player is listed with rallies left');
+e7.unpass(passKey);
+v7 = e7.view();
+assert.strictEqual(v7.passed.length, 0, 'Undo clears the pass');
+assert.ok(v7.playerCards.home.some((c) => c.key === passKey), 'player is back after Undo');
+
+// Summary rows ("Set 1", "Match", "TEAM") that slip past a reader never become cards or count in totals.
+const e3 = create({ now: () => 0 });
+const bogus = rp.snapshot(60);
+bogus.teams.home = { ...bogus.teams.home, players: bogus.teams.home.players.concat([
+  { uni: '1', last: 'Set 1', first: '', k: 40, e: 5, ta: 90, a: 30, sa: 5, se: 1, re: 0, dig: 40, bs: 2, ba: 6, be: 0 },
+  { uni: '99', last: 'Match', first: '', k: 80, e: 9, ta: 150, a: 70, sa: 9, se: 3, re: 2, dig: 90, bs: 4, ba: 12, be: 1 },
+  { uni: '', last: 'TEAM', first: '', k: 0, e: 0, ta: 0, a: 0, sa: 0, se: 0, re: 0, dig: 0, bs: 0, ba: 0, be: 0 }]) };
+const v3 = e3.update(bogus, []);
+const shown = v3.playerCards.home.map((c) => c.last).concat(v3.players.home.map((r) => r.last));
+assert.ok(!shown.some((x) => /^(set|match|team)\b/i.test(x)), 'summary rows never become player cards or list rows: ' + shown.join(','));
+const clean = create({ now: () => 0 }).update(rp.snapshot(60), []);
+assert.deepStrictEqual(v3.teamCards.home.map((c) => c.big), clean.teamCards.home.map((c) => c.big), 'summary rows do not inflate team totals');
+
+// 5-card layout: each side fills 5 cards once 5 players have a stat; the list highlights exactly those 5.
+const e5 = create({ now: () => 0 });
+e5.setCards(5);
+const v5 = e5.update(rp.snapshot(60), []);
+assert.strictEqual(v5.playerCards.home.length, 5, '5 home cards');
+assert.strictEqual(v5.players.home.filter((r) => r.top).length, 5, '5 highlighted list rows');
+assert.strictEqual(v5.layout.cards, 5);
+
+// Auto-rotate: rotate() swaps the non-pinned cards for players not on the board; the pinned card stays;
+// between rotations at most one card changes per update.
+const e6 = create({ now: () => 0 });
+let v6 = e6.update(rp.snapshot(80), []);
+const before = v6.playerCards.away.map((c) => c.key);
+e6.toggleHold(before[0]);
+e6.rotate();
+v6 = e6.view();
+const after = v6.playerCards.away.map((c) => c.key);
+assert.ok(after.includes(before[0]) && v6.playerCards.away.find((c) => c.key === before[0]).held, 'pinned card survives a rotation');
+const kept = after.filter((k) => before.includes(k)).length;
+assert.strictEqual(kept, 1, `rotation replaced the unpinned cards (kept ${kept} of ${before.length})`);
+for (let i = 81; i <= 90; i++) {
+  const prev = v6.playerCards.away.map((c) => c.key);
+  v6 = e6.update(rp.snapshot(i), rp.linesAt(i));
+  const changed = v6.playerCards.away.filter((c) => !prev.includes(c.key)).length;
+  assert.ok(changed <= 1, `rally ${i}: ${changed} cards changed in one update`);
+}
 
 console.log(`\nCard set changed on ${churn} of ${rp.total} rallies`);
 console.log(`Slowest update: ${maxMs.toFixed(2)} ms`);

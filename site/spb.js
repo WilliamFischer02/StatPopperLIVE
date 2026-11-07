@@ -1,11 +1,11 @@
-/* Stat Pop Board 0.3.5: reads only the page you have open and shares it with the board window on this computer. */
+/* Stat Pop Board 0.4.1: reads only the page you have open and shares it with the board window on this computer. */
 (function () {
 'use strict';
 if (window.SPB && window.SPB.version) { if (!window.__spbNoReader && window.SPB.show) window.SPB.show(); return; }
 var cs = document.currentScript;
-var SPB = { version: "0.3.5" };
+var SPB = { version: "0.4.1" };
 SPB.origin = window.__spbOrigin || (cs && cs.src ? new URL(cs.src, location.href).origin : null) || "https://stat-pop-board.vercel.app";
-SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.3.5' : null;
+SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.4.1' : null;
 SPB.fontsHref = "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap";
 SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos":"OH"},{"uni":"5","first":"Keely","last":"Culler","pos":"OH"},{"uni":"6","first":"Teagan","last":"Jaynes","pos":"S"},{"uni":"7","first":"Lauren","last":"Schloe","pos":"MB/OPP"},{"uni":"9","first":"Maggie","last":"Rhew","pos":"S/DS"},{"uni":"11","first":"Elli","last":"Esko","pos":"OH"},{"uni":"12","first":"Afton","last":"Thomsen","pos":"L/DS"},{"uni":"13","first":"Jolene","last":"Green Ewen","pos":"MB"},{"uni":"14","first":"Taylor","last":"McDonald","pos":"MH/OPP"},{"uni":"15","first":"Teya","last":"Yeomans","pos":"OH"},{"uni":"16","first":"Haven","last":"Rich","pos":"L/DS"},{"uni":"17","first":"Alice","last":"Steman","pos":"MB"},{"uni":"18","first":"Karli","last":"Heidemann","pos":"OH"},{"uni":"22","first":"Joelie","last":"Spelts","pos":"MB"},{"uni":"23","first":"Elli","last":"Tufto","pos":"OH"},{"uni":"45","first":"Nicolette","last":"Noble","pos":"L/DS"}] };
 /*
@@ -242,10 +242,13 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     const clock = opts.now || (() => Date.now());
     // minPops: options per player card, filling with greyed lines if needed. holdMs: how long Pin keeps a card.
     // dwellRallies: a card that just arrived gets a stickiness bonus for this many rallies, so cards don't flicker.
-    const cfg = { pops: VB_POPS, maxCards: 3, maxPops: 3, minPops: 2, maxTeamCards: 2, passRallies: 10,
+    // maxCards: player cards per side (3 or 5; the full-list layout highlights maxCards rows).
+    // Team card: one per side with minTeamLines..maxTeamLines stat lines, notable ones first.
+    const cfg = { pops: VB_POPS, maxCards: 3, maxPops: 3, minPops: 2, minTeamLines: 3, maxTeamLines: 5, passRallies: 10,
       holdMs: 10 * 60 * 1000, dwellRallies: 4 };
     // held: cards William pinned with the Pin button, key -> { since, until } in clock ms.
-    const user = { hidden: new Set(), passed: {}, stars: { home: [], away: [] }, held: {} };
+    // restore: a player whose Pass was just undone; they come straight back on the next compute.
+    const user = { hidden: new Set(), passed: {}, stars: { home: [], away: [] }, held: {}, restore: null };
     let mem, last;
     const freshServe = () => ({ side: null, uni: null, streak: 0, turns: { home: [], away: [] }, lastTurnSide: null });
 
@@ -255,6 +258,8 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         points: [], plays: [], involvement: [], pins: { home: null, away: null },
         serve: freshServe(),
         prevSel: { home: [], away: [] }, prevTeam: { home: [], away: [] }, since: {},
+        // statAt: the rally when each player's stat line last changed (staleness). rotateDue: set by rotate().
+        statAt: {}, prevStats: {}, rotateDue: { home: false, away: false },
         consoleAlert: null, setWon: null,
         prevTotals: null, setStart: null, finishedSet: null,
       };
@@ -262,6 +267,25 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       last = null;
     }
     reset();
+
+    // Summary rows that a page reader might still pass as players (team, totals, "Set 1", "Match"). The reader
+    // rejects them too (v0.3.5); this is the second line of defence so they never reach a card or a total.
+    const NON_PLAYER = /^(sets?|game|match|totals?|team|tm|opp(onent)?s?)\b|^\d+(st|nd|rd|th)?(\s+sets?)?$/i;
+    const realPlayer = (p) => p && /^\d{1,2}$/.test(String(p.uni || '').trim()) && /\p{L}/u.test(String(p.last || '')) && !NON_PLAYER.test(String(p.last || '').trim());
+    function cleanSnapshot(s) {
+      const t = {};
+      for (const side of SIDES) t[side] = { ...s.teams[side], players: (s.teams[side].players || []).filter(realPlayer) };
+      return { ...s, teams: t };
+    }
+
+    const STAT_FIELDS = ['k', 'e', 'ta', 'a', 'sa', 'se', 're', 'dig', 'bs', 'ba', 'be'];
+    function trackStats(s) {
+      for (const side of SIDES) for (const p of s.teams[side].players) {
+        const key = playerKey(side, p.uni);
+        const h = STAT_FIELDS.map((f) => num(p[f])).join(',');
+        if (mem.prevStats[key] !== h) { mem.prevStats[key] = h; mem.statAt[key] = mem.rally; }
+      }
+    }
 
     function onPoint(side) {
       mem.rally += 1;
@@ -356,6 +380,8 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         if (play.server || play.act) pointPlay = play;
       }
       if (mem.plays.length > 60) mem.plays.splice(0, mem.plays.length - 60);
+      // Involvement only counts for 12 rallies; drop older entries so the list never grows for a whole match.
+      if (mem.involvement.length > 80) mem.involvement = mem.involvement.filter((x) => mem.rally - x.rally <= 12);
       trackServe(pointPlay, pointSide);
     }
 
@@ -441,17 +467,20 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       fill('ace', T.sa > 0, T.sa / (1.5 * e), pl(T.sa, 'Ace'), `${oc} ${O.sa}`);
       if (S) fill('sethit', S.ta >= 8, (S.pct - 0.1) / 0.2, `Set ${s.set} Hit% ${fmtPct(S.pct, true)}`, `${oc} ${fmtPct(So.pct, true)} this set`);
 
-      // Pre-match preview: no team has a stat yet, so none of the fillers above qualify. Show the two
-      // everyday lines at their zero values, greyed, so both team columns have cards before first serve.
+      // Pre-match preview: no team has a stat yet, so none of the fillers above qualify. Show the everyday
+      // lines at their zero values, greyed, so both team cards have lines before first serve.
       if (s.status === 'pre' && !c.length) {
         const z = (x) => fmtPct(x.ta > 0 ? x.pct : 0, true);
         c.push({ id: 'hit', dim: true, score: 0.06, big: `Team Hit% ${z(T)}`, sub: `${oc} ${z(O)}` });
         c.push({ id: 'kills', dim: true, score: 0.05, big: pl(T.k, 'Kill'), sub: `${oc} ${O.k}` });
+        c.push({ id: 'blk', dim: true, score: 0.04, big: pl(fmtHalf(T.tb), 'Block'), sub: `${oc} ${fmtHalf(O.tb)}` });
       }
       const prev = mem.prevTeam[side];
       for (const x of c) if (prev.includes(x.id)) x.score += 0.2;
       c.sort((a, b) => b.score - a.score);
-      const pick = c.slice(0, cfg.maxTeamCards);
+      // One team card per side: up to maxTeamLines notable lines; greyed fillers only top it up to minTeamLines.
+      const pick = c.filter((x) => !x.dim).slice(0, cfg.maxTeamLines);
+      for (const x of c) { if (pick.length >= cfg.minTeamLines) break; if (!pick.includes(x)) pick.push(x); }
       mem.prevTeam[side] = pick.map((x) => x.id);
       return pick;
     }
@@ -549,46 +578,91 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       const pool = players.map((p) => scorePlayer(p, side, e, highs, s, sv))
         .filter((c) => !user.hidden.has(c.key))
         .filter((c) => c.pinned || c.hold || !(user.passed[c.key] > mem.rally));
-      // Order: cards William pinned, then notable or live cards by impact, then the most active of the
-      // rest (greyed) so the side always has its full set. A card that just arrived is sticky for a few rallies.
-      const prevKeys = new Set(mem.prevSel[side]);
-      const sticky = (c) => (prevKeys.has(c.key) && mem.rally - (mem.since[c.key] ?? -1e9) <= cfg.dwellRallies ? 1.5 : 0);
-      const rank = (c) => (c.eligible ? 10 + c.impact : c.activity + (prevKeys.has(c.key) ? 0.5 : 0) + (c.starred ? 0.35 : 0)) + sticky(c);
-      const held = pool.filter((c) => c.hold).sort((a, b) => a.hold.since - b.hold.since).slice(0, cfg.maxCards);
-      const rest = pool.filter((c) => !c.hold && (c.eligible || c.starred || c.activity > 0)).sort((a, b) => rank(b) - rank(a));
-      const chosen = held.concat(rest).slice(0, cfg.maxCards);
+      const byKey = Object.fromEntries(pool.map((c) => [c.key, c]));
+      const MAX = cfg.maxCards;
+      const rank = (c) => (c.eligible ? 10 + c.impact : c.activity + (c.starred ? 0.35 : 0));
+      const worth = (c) => c.eligible || c.starred || c.activity > 0;
+      // Incumbents: the cards shown last time that still have something to show (a pre-match preview card
+      // with no stat yet drops out as soon as a real stat appears).
+      const prevKeys = mem.prevSel[side].filter((k) => byKey[k] && worth(byKey[k]));
+      const prevSet = new Set(prevKeys);
+      const sticky = (c) => prevSet.has(c.key) && mem.rally - (mem.since[c.key] ?? -1e9) <= cfg.dwellRallies;
+      // Stalest first: the card whose player's stat line changed longest ago, then the one up the longest.
+      const staleness = (c) => (mem.statAt[c.key] ?? -1) * 1000 + (mem.since[c.key] ?? 0);
+      const held = pool.filter((c) => c.hold).sort((a, b) => a.hold.since - b.hold.since).slice(0, MAX);
+      const rotateNow = mem.rotateDue[side];
+      mem.rotateDue[side] = false;
+      let chosen;
+      if (rotateNow || !prevKeys.length) {
+        // Rotation (or the first fill): pins first, then every player with a stat who is not on the board,
+        // best first, then the ones who are. So a rotation turns over all the unpinned cards whenever enough
+        // other players have something to show; starred players are put back below.
+        const fresh = (c) => (rotateNow && !prevSet.has(c.key) ? 1 : 0);
+        const rest = pool.filter((c) => !c.hold && worth(c)).sort((a, b) => fresh(b) - fresh(a) || rank(b) - rank(a));
+        chosen = held.concat(rest).slice(0, MAX);
+      } else {
+        // Between rotations the board holds still. Pins take slots first; then at most one card changes per
+        // update: the best player not on the board replaces the stalest card, and only for a live reason
+        // (named in the last play, a serving streak) or because it clearly outranks a weaker card.
+        chosen = held.slice();
+        for (const k of prevKeys) if (chosen.length < MAX && !chosen.some((c) => c.key === k)) chosen.push(byKey[k]);
+        const inSet = new Set(chosen.map((c) => c.key));
+        const isUrgent = (c) => c.pinned || c.serving || c.key === user.restore;
+        const challengers = pool.filter((c) => !inSet.has(c.key) && !c.hold && worth(c))
+          .sort((a, b) => (isUrgent(b) - isUrgent(a)) || rank(b) - rank(a));
+        while (chosen.length < MAX && challengers.length) chosen.push(challengers.shift());
+        const top = challengers[0];
+        if (top && chosen.length >= MAX) {
+          const urgent = isUrgent(top);
+          // Live cards (named in the last play, or on a serving streak) are never the one swapped out.
+          const victims = chosen.filter((c) => !c.hold && !c.pinned && !c.serving && (urgent || !sticky(c))).sort((a, b) => staleness(a) - staleness(b));
+          const v = victims[0];
+          if (v && (urgent || (top.eligible && (!v.eligible || rank(top) > rank(v) + 0.5)))) chosen[chosen.indexOf(v)] = top;
+        }
+      }
       // Impact players: at least one starred player always has a card on their side.
-      const starredPool = rest.filter((c) => c.starred);
+      const starredPool = pool.filter((c) => c.starred && !c.hold && worth(c)).sort((a, b) => rank(b) - rank(a));
       if (starredPool.length && !chosen.some((c) => c.starred)) {
-        if (chosen.length < cfg.maxCards) chosen.push(starredPool[0]);
+        if (chosen.length < MAX) chosen.push(starredPool[0]);
         else {
-          let idx = -1;
-          for (let i = chosen.length - 1; i >= 0; i--) if (!chosen[i].pinned && !chosen[i].hold) { idx = i; break; }
-          if (idx >= 0) chosen[idx] = starredPool[0];
+          const victims = chosen.filter((c) => !c.hold && !c.pinned && !c.serving).sort((a, b) => staleness(a) - staleness(b));
+          if (victims[0]) chosen[chosen.indexOf(victims[0])] = starredPool[0];
         }
       }
       // Pre-match preview (status 'pre', the page's SET 0): nobody has a stat yet, so the rules above
       // leave the side empty. Fill its slots with the roster in page order, greyed, so the layout can be
       // checked before first serve. Once the set starts this never runs: cards then come only from stats.
-      if (s.status === 'pre' && chosen.length < cfg.maxCards) {
+      if (s.status === 'pre' && chosen.length < MAX) {
         const have = new Set(chosen.map((c) => c.key));
         for (const c of pool) {
-          if (chosen.length >= cfg.maxCards) break;
+          if (chosen.length >= MAX) break;
           if (!have.has(c.key)) { chosen.push(c); have.add(c.key); }
         }
       }
+      if (user.restore && user.restore.split(':')[0] === side) user.restore = null;
       const chosenKeys = new Set(chosen.map((c) => c.key));
       // Keep returning players in the slot they held, so cards don't jump around.
-      const slots = new Array(cfg.maxCards).fill(null);
+      const slots = new Array(MAX).fill(null);
       mem.prevSel[side].forEach((k, i) => { if (chosenKeys.has(k) && i < slots.length) slots[i] = k; });
       const placed = new Set(slots.filter(Boolean));
       for (const c of chosen) if (!placed.has(c.key)) { const i = slots.indexOf(null); slots[i] = c.key; placed.add(c.key); }
-      const prevSet = new Set(mem.prevSel[side]);
+      const wasShown = new Set(mem.prevSel[side]);
       mem.prevSel[side] = slots.filter(Boolean);
-      for (const k of mem.prevSel[side]) if (!prevSet.has(k)) mem.since[k] = mem.rally;
-      const byKey = Object.fromEntries(chosen.map((c) => [c.key, c]));
-      return slots.filter(Boolean).map((k) => ({ ...cardFor(byKey[k], sv, teamLeads), isNew: !prevSet.has(k) }));
+      for (const k of mem.prevSel[side]) if (!wasShown.has(k)) mem.since[k] = mem.rally;
+      const cards = slots.filter(Boolean).map((k) => ({ ...cardFor(byKey[k], sv, teamLeads), isNew: !wasShown.has(k) }));
+      // Full roster for the list layout: the carded players first (in slot order), then the rest by rank.
+      const order = new Map(mem.prevSel[side].map((k, i) => [k, i]));
+      const list = pool.slice().sort((a, b) => {
+        const ia = order.has(a.key) ? order.get(a.key) : 1e9, ib = order.has(b.key) ? order.get(b.key) : 1e9;
+        return ia - ib || rank(b) - rank(a) || (parseInt(a.p.uni, 10) || 0) - (parseInt(b.p.uni, 10) || 0);
+      }).map((c) => ({ key: c.key, uni: c.p.uni, first: c.p.first, last: c.p.last, top: order.has(c.key), starred: !!c.starred,
+        held: !!c.hold, live: !!c.pinned, stats: listStats(c.p) }));
+      return { cards, list };
     }
+
+    // The two-stat view in the list layout picks from these, by field name.
+    const listStats = (p) => ({ k: p.k, e: p.e, ta: p.ta, pct: fmtPct(p.pct), a: p.a, sa: p.sa, se: p.se, dig: p.dig,
+      bs: p.bs, ba: p.ba, tb: fmtHalf(p.tb), pts: fmtHalf(p.pts) });
 
     function matchHighs(s) {
       const all = [];
@@ -676,17 +750,26 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
           last: serverP ? serverP.last : predicted ? predicted.last : null } : null,
         alerts: alerts(s),
         plays: mem.plays.slice(-6).reverse().map((p) => ({ text: p.text, score: p.score, alert: !!p.alert })),
-        teamCards: {}, playerCards: {}, rotation: rot,
+        teamCards: {}, playerCards: {}, players: {}, rotation: rot,
+        layout: { cards: cfg.maxCards },
         hidden: [...user.hidden].map((k) => {
           const [side, uni] = k.split(':');
           const p = s.teams[side].players.find((x) => String(x.uni) === uni);
           return { key: k, side, uni, last: p ? p.last : '#' + uni };
         }),
+        // Players skipped with Pass and still skipped, so the board can offer an Undo.
+        passed: Object.keys(user.passed).filter((k) => user.passed[k] > mem.rally && !user.hidden.has(k)).map((k) => {
+          const [side, uni] = k.split(':');
+          const p = s.teams[side] && s.teams[side].players.find((x) => String(x.uni) === uni);
+          return { key: k, side, uni, last: p ? p.last : '#' + uni, rallies: user.passed[k] - mem.rally };
+        }),
         effSets: Math.round(e * 100) / 100,
       };
       for (const side of SIDES) {
         view.teamCards[side] = teamCards(s, side, e);
-        view.playerCards[side] = playerCards(s, side, e, highs);
+        const pc = playerCards(s, side, e, highs);
+        view.playerCards[side] = pc.cards;
+        view.players[side] = pc.list;
       }
       return view;
     }
@@ -694,18 +777,25 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     return {
       reset,
       update(snapshot, lines) {
+        snapshot = cleanSnapshot(snapshot);
         const index = buildNameIndex(snapshot);
         const totals = { home: teamTotals(snapshot.teams.home), away: teamTotals(snapshot.teams.away) };
         if (!mem.setStart && num(snapshot.score.home) + num(snapshot.score.away) === 0) mem.setStart = totals;
         const pointSide = trackScore(snapshot, totals);
         mem.prevTotals = totals;
         ingest(lines || [], snapshot, index, pointSide);
+        trackStats(snapshot);
         mem.setsWon = { home: num(snapshot.setsWon.home), away: num(snapshot.setsWon.away) };
         last = snapshot;
         return compute();
       },
       view() { return last ? compute() : null; },
+      // Layout: how many player cards each side shows (3 or 5). The list layout highlights that many rows.
+      setCards(n) { cfg.maxCards = n === 5 ? 5 : 3; },
+      // Auto-rotate: the next compute swaps the non-pinned cards for the best players not yet on the board.
+      rotate() { mem.rotateDue = { home: true, away: true }; },
       pass(key) { delete user.held[key]; user.passed[key] = mem.rally + cfg.passRallies; if (mem.pins.home && mem.pins.home.key === key) mem.pins.home = null; if (mem.pins.away && mem.pins.away.key === key) mem.pins.away = null; },
+      unpass(key) { delete user.passed[key]; user.restore = key; },
       hide(key) { delete user.held[key]; user.hidden.add(key); },
       // Pin button: keep a player's card on the board (live-updating) for holdMs, or until pinned again.
       // Each side holds at most maxCards pins; pinning one more releases that side's oldest.
@@ -758,10 +848,76 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     return lum > 0.179 ? '#0c1014' : '#ffffff';
   }
 
+  // Stats the list layout can show, by engine field. The label is what the graphics software calls it.
+  const LIST_STATS = [
+    { id: 'k', label: 'Kills', l: 'K' }, { id: 'dig', label: 'Digs', l: 'DIG' }, { id: 'tb', label: 'Blocks', l: 'BLK' },
+    { id: 'a', label: 'Assists', l: 'AST' }, { id: 'sa', label: 'Aces', l: 'ACE' }, { id: 'pts', label: 'Points', l: 'PTS' },
+    { id: 'pct', label: 'Hit %', l: 'HIT' }, { id: 'ta', label: 'Attempts', l: 'TA' }, { id: 'e', label: 'Errors', l: 'E' },
+  ];
+
+  const ROTATE_OPTIONS = [[0, 'Off'], [15, '15 s'], [30, '30 s'], [45, '45 s'], [60, '1 min'], [90, '1½ min'], [120, '2 min'],
+    [180, '3 min'], [240, '4 min'], [300, '5 min'], [420, '7 min'], [600, '10 min']];
+
+  // The board controls (card layout, list stats, auto-rotate), shared by the board page and the in-tab overlay.
+  // opts.get/set read and write the three settings ('layout', 'liststats', 'rotate'); opts.onChange runs after a change.
+  function mountControls(host, opts) {
+    opts = opts || {};
+    const get = (k, d) => (opts.get ? opts.get(k, d) : d), set = (k, v) => { if (opts.set) opts.set(k, v); };
+    const settings = { layout: String(get('layout', '3')), listStats: get('liststats', ['k', 'dig']), rotate: +get('rotate', 0) || 0 };
+    if (!['3', '5', 'all'].includes(settings.layout)) settings.layout = '3';
+    if (!Array.isArray(settings.listStats) || settings.listStats.length !== 2 || !settings.listStats.every((id) => LIST_STATS.some((x) => x.id === id))) settings.listStats = ['k', 'dig'];
+    if (!ROTATE_OPTIONS.some((o) => o[0] === settings.rotate)) settings.rotate = 0;
+    const statSel = (id, label) => `<select id="${id}" aria-label="${label}">${LIST_STATS.map((x) => `<option value="${x.id}">${esc(x.label)}</option>`).join('')}</select>`;
+    host.innerHTML = `
+      <span class="ctl">Cards <span class="seg" id="layoutseg" role="group" aria-label="Player card layout"><button type="button" data-layout="3">3 per team</button><button type="button" data-layout="5">5 per team</button><button type="button" data-layout="all">All players</button></span></span>
+      <span class="ctl" id="liststats">Show ${statSel('statA', 'First stat')} &amp; ${statSel('statB', 'Second stat')}</span>
+      <span class="ctl">Rotate <select id="rotate" aria-label="Auto-rotate cards" title="Swap the unpinned cards for other players this often">${ROTATE_OPTIONS.map((o) => `<option value="${o[0]}">${esc(o[1])}</option>`).join('')}</select><span class="count" id="rotatecount"></span></span>`;
+    const $ = (sel) => host.querySelector(sel);
+    function paint() {
+      host.querySelectorAll('button[data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === settings.layout)));
+      $('#liststats').hidden = settings.layout !== 'all';
+      $('#statA').value = settings.listStats[0]; $('#statB').value = settings.listStats[1];
+      $('#rotate').value = String(settings.rotate);
+    }
+    const changed = (what) => { paint(); if (opts.onChange) opts.onChange(settings, what); };
+    host.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-layout]');
+      if (!b) return;
+      settings.layout = b.dataset.layout; set('layout', settings.layout); changed('layout');
+    });
+    const onStats = () => { settings.listStats = [$('#statA').value, $('#statB').value]; set('liststats', settings.listStats); changed('liststats'); };
+    $('#statA').addEventListener('change', onStats);
+    $('#statB').addEventListener('change', onStats);
+    $('#rotate').addEventListener('change', () => { settings.rotate = +$('#rotate').value || 0; set('rotate', settings.rotate); changed('rotate'); });
+    paint();
+    return { settings, setCountdown(text) { $('#rotatecount').textContent = text || ''; } };
+  }
+
+  // Copy a line to the clipboard: the async API first, a hidden textarea when that is blocked.
+  function copyText(text) {
+    const fallback = () => {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+      } catch (e) { /* nothing more to try */ }
+    };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(fallback);
+      else fallback();
+    } catch (e) { fallback(); }
+  }
+
   function mountBoard(host, handlers) {
     handlers = handlers || {};
     let tab = 'plays';
     let lastView = null;
+    // The line copied most recently, so its "Copied" mark survives a re-render for a moment.
+    let copied = { text: null, until: 0 };
+    // Layout: 'cards' (3 or 5 per side, from the view) or 'list' (every player, two stats, top rows highlighted).
+    let layout = 'cards', listStats = ['k', 'dig'];
+    // Last value drawn for each stat on each card, so a number that just changed can flash.
+    let lastVals = new Map(), lastAlertKey = '';
     host.innerHTML = `
       <div class="board">
         <section class="q q-game" aria-label="Game"></section>
@@ -792,7 +948,18 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
 
     host.addEventListener('click', (ev) => {
       const b = ev.target.closest('button[data-act]');
-      if (!b) return;
+      if (!b) {
+        // Click a pop line or a team line to copy it, ready to paste.
+        const row = ev.target.closest('[data-copy]');
+        if (row && host.contains(row)) {
+          copyText(row.dataset.copy);
+          copied = { text: row.dataset.copy, until: Date.now() + 1500 };
+          host.querySelectorAll('.copied').forEach((el) => el.classList.remove('copied'));
+          row.classList.add('copied');
+          if (handlers.copied) handlers.copied(row.dataset.copy);
+        }
+        return;
+      }
       const act = b.dataset.act;
       if (act === 'tab') { tab = b.dataset.tab; if (lastView) drawGame(lastView); return; }
       if (act === 'color') {
@@ -804,53 +971,85 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       if (handlers[act]) handlers[act](b.dataset.key);
     });
 
-    function partsHTML(parts) {
-      return parts.map((p) => `<span class="pv"><span class="v">${esc(p.v)}</span><span class="l">${esc(p.l)}</span></span>`).join('');
+    // A value that changed since the last draw gets the .tick flash, so "12 K" becoming "13 K" is seen, not read.
+    function partsHTML(parts, slot, vals) {
+      return parts.map((p) => {
+        const id = slot + '|' + p.l;
+        const was = lastVals.get(id);
+        vals.set(id, p.v);
+        const tick = was !== undefined && was !== p.v ? ' tick' : '';
+        return `<span class="pv${tick}"><span class="v">${esc(p.v)}</span><span class="l">${esc(p.l)}</span></span>`;
+      }).join('');
     }
 
-    const clockTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const minsLeft = (ms) => Math.max(1, Math.round((ms - Date.now()) / 60000));
+    // What a click copies: "GREENY · Attacks & Blocks · 12 K · .350 HIT · 3 BLK".
+    const popLine = (c, p) => `${String(c.last).toUpperCase()} · ${p.name} · ${p.parts.map((x) => x.v + ' ' + x.l).join(' · ')}`;
+    const isCopied = (text) => copied.text === text && Date.now() < copied.until;
 
-    function playerCard(c) {
+    function playerCard(c, vals) {
       const live = c.tag && c.tag.kind === 'live';
       const tag = c.tag ? (live ? `<span class="livedot">${esc(c.tag.text)}</span>` : `<span class="tag-serve">${esc(c.tag.text)}</span>`) : '';
       const reason = c.reason ? `<span>${esc(c.reason)}</span>` : '';
-      const star = c.starred ? '<span class="impact">★ Impact</span>' : '';
-      const held = c.held ? `<span class="held">Pinned · until ${esc(clockTime(c.held.until))}</span>` : '';
       const starBtn = handlers.star
-        ? `<button class="abtn star${c.starred ? ' on' : ''}" data-act="star" data-key="${esc(c.key)}" aria-pressed="${c.starred}" title="${c.starred ? 'Remove from impact players' : 'Make an impact player'}" aria-label="Impact player">★</button>` : '';
+        ? `<button class="abtn star${c.starred ? ' on' : ''}" data-act="star" data-key="${esc(c.key)}" aria-pressed="${c.starred}" title="${c.starred ? 'Remove from impact players' : 'Star as impact player'}" aria-label="Impact player">★</button>` : '';
       const pinBtn = handlers.hold
-        ? `<button class="abtn pin${c.held ? ' on' : ''}" data-act="hold" data-key="${esc(c.key)}" aria-pressed="${!!c.held}" title="${c.held ? 'Let this card go' : 'Keep this card on the board for 10 minutes'}">${c.held ? 'Unpin' : 'Pin'}</button>` : '';
+        ? `<button class="abtn pin${c.held ? ' on' : ''}" data-act="hold" data-key="${esc(c.key)}" aria-pressed="${!!c.held}" title="${c.held ? `Pinned for ${minsLeft(c.held.until)} min more · click to unpin` : 'Keep on the board for 10 min'}">${c.held ? '● Pinned' : 'Pin'}</button>` : '';
       const pops = c.pops.length
-        ? c.pops.map((p) => `<li class="pop${p.best ? ' best' : ''}${p.live ? ' live' : ''}${p.dim ? ' dim' : ''}"><span class="pname">${esc(p.name)}</span><span class="pvals">${partsHTML(p.parts)}</span></li>`).join('')
+        ? c.pops.map((p) => {
+          const line = popLine(c, p);
+          return `<li class="pop${p.best ? ' best' : ''}${p.live ? ' live' : ''}${p.dim ? ' dim' : ''}${isCopied(line) ? ' copied' : ''}" data-copy="${esc(line)}" title="Click to copy"><span class="pname">${esc(p.name)}</span><span class="pvals">${partsHTML(p.parts, c.key + '|' + p.id, vals)}</span></li>`;
+        }).join('')
         : '<li class="pop none">No stats yet</li>';
       return `<article class="pcard${live ? ' is-live' : ''}${c.isNew ? ' is-new' : ''}${c.starred ? ' is-star' : ''}${c.held ? ' is-held' : ''}${c.dim ? ' is-dim' : ''}" data-key="${esc(c.key)}">
         <div class="phead">
           <div class="jersey" aria-label="Number ${esc(c.uni)}">${esc(c.uni)}</div>
-          <div class="who"><div class="last">${esc(c.last)}</div><div class="meta"><span>${esc(c.first)}</span>${held}${star}${tag}${reason}</div></div>
+          <div class="who"><div class="last">${esc(c.last)}</div><div class="meta">${tag}${reason}<span>${esc(c.first)}</span></div></div>
           <div class="acts">${pinBtn}${starBtn}
             <button class="abtn" data-act="pass" data-key="${esc(c.key)}" title="Skip this player for the next 10 rallies">Pass</button>
-            <button class="abtn" data-act="hide" data-key="${esc(c.key)}" title="Hide this player for the rest of the match">Hide</button>
+            <button class="abtn hide" data-act="hide" data-key="${esc(c.key)}" title="Hide this player for the rest of the match">Hide</button>
           </div>
         </div>
         <ol class="pops">${pops}</ol>
       </article>`;
     }
 
-    function drawPlayers(v, side) {
+    // List layout: every player on the side, two chosen stats, the carded players highlighted on top.
+    function playerList(v, side, vals) {
+      const cols = listStats.map((id) => LIST_STATS.find((x) => x.id === id) || LIST_STATS[0]);
+      const rows = v.players[side].map((r) => {
+        const cells = cols.map((c) => {
+          const id = r.key + '|list|' + c.id, val = r.stats[c.id];
+          const was = lastVals.get(id); vals.set(id, val);
+          return `<span class="pv${was !== undefined && was !== val ? ' tick' : ''}"><span class="v">${esc(val)}</span><span class="l">${esc(c.l)}</span></span>`;
+        }).join('');
+        const pinBtn = handlers.hold ? `<button class="abtn pin${r.held ? ' on' : ''}" data-act="hold" data-key="${esc(r.key)}" aria-pressed="${r.held}" title="${r.held ? 'Click to unpin' : 'Keep on the board for 10 min'}">${r.held ? '●' : 'Pin'}</button>` : '';
+        return `<li class="prow${r.top ? ' is-top' : ''}${r.live ? ' is-live' : ''}${r.starred ? ' is-star' : ''}${r.held ? ' is-held' : ''}" data-key="${esc(r.key)}">
+          <span class="jersey">${esc(r.uni)}</span><span class="last">${esc(r.last)}${r.starred ? ' <span class="impact">★</span>' : ''}</span>
+          <span class="pvals">${cells}</span>${pinBtn}</li>`;
+      }).join('');
+      return `<ol class="plist">${rows || `<li class="empty">No ${esc(v.teams[side].code)} players listed yet.</li>`}</ol>`;
+    }
+
+    function drawPlayers(v, side, vals) {
       const t = v.teams[side];
       const cards = v.playerCards[side];
-      const empty = cards.length < 3
-        ? `<div class="empty">${cards.length ? 'No other' : 'No'} ${esc(t.code)} player has a stat yet.</div>` : '';
-      regions[side].innerHTML = `<div class="eyebrow">${swatch(side, t.code)}${esc(t.name || t.code)} players</div>
-        <div class="pstack">${cards.map(playerCard).join('')}${empty}</div>`;
+      const want = v.layout ? v.layout.cards : 3;
+      let body;
+      if (layout === 'list') body = playerList(v, side, vals);
+      else {
+        const empty = cards.length < want ? `<div class="empty">${cards.length ? 'No other' : 'No'} ${esc(t.code)} player has a stat yet.</div>` : '';
+        body = `<div class="pstack">${cards.map((c) => playerCard(c, vals)).join('')}${empty}</div>`;
+      }
+      regions[side].innerHTML = `<div class="eyebrow">${swatch(side, t.code)}${esc(t.name || t.code)}</div>${body}`;
     }
 
     function drawTeam(v) {
       const col = (side) => {
         const t = v.teams[side];
-        const cards = v.teamCards[side];
-        const body = cards.length
-          ? cards.map((c) => `<div class="tcard${c.live ? ' is-live' : ''}${c.dim ? ' is-dim' : ''}"><div class="big">${esc(c.big)}</div><div class="sub">${c.live ? '<span class="livedot">Live</span> ' : ''}${esc(c.sub || '')}</div></div>`).join('')
+        const lines = v.teamCards[side];
+        const body = lines.length
+          ? `<div class="tcard">${lines.map((c) => `<div class="tline${c.live ? ' is-live' : ''}${c.dim ? ' is-dim' : ''}${isCopied(c.big) ? ' copied' : ''}" data-copy="${esc(c.big)}" title="Click to copy"><div class="big">${esc(c.big)}</div><div class="sub">${c.live ? '<span class="livedot">Live</span> ' : ''}${esc(c.sub || '')}</div></div>`).join('')}</div>`
           : `<div class="empty">No ${esc(t.code)} team stats yet.</div>`;
         return `<div class="tcol side-${side}"><div class="eyebrow">${swatch(side, t.code)}${esc(t.code)}</div>${body}</div>`;
       };
@@ -874,21 +1073,25 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     function drawGame(v) {
       lastView = v;
       const sv = v.serving;
-      const serveLine = sv ? `<span class="ball" style="background:var(--${sv.side})"></span>${esc(v.teams[sv.side].code)} serving${sv.last ? ` · <b>#${esc(sv.uni)} ${esc(sv.last)}</b>${sv.predicted ? ' (next up)' : ''}` : ''}${sv.streak >= 2 ? ` · ${sv.streak} straight` : ''}` : '';
-      const alerts = v.alerts.map((a) => `<div class="alert ${a.sev}" role="status"><strong>${esc(a.text)}</strong>${a.sub ? `<span>${esc(a.sub)}</span>` : ''}</div>`).join('');
+      const serveLine = sv ? `<span class="ball" style="background:var(--${sv.side})"></span>${esc(v.teams[sv.side].code)} serving${sv.last ? ` · <b>#${esc(sv.uni)} ${esc(sv.last)}</b>${sv.predicted ? ' · next' : ''}` : ''}${sv.streak >= 2 ? ` · ${sv.streak} straight` : ''}` : '';
+      // An alert that just appeared (or changed) pulses once, so it registers while the eye is on the cards.
+      const alertKey = v.alerts.map((a) => a.kind + a.text).join('|');
+      const fresh = alertKey && alertKey !== lastAlertKey;
+      lastAlertKey = alertKey;
+      const alerts = v.alerts.map((a) => `<div class="alert ${a.sev}${fresh ? ' is-new' : ''}" role="status"><strong>${esc(a.text)}</strong>${a.sub ? `<span>${esc(a.sub)}</span>` : ''}</div>`).join('');
       const plays = v.plays;
       const lastPlay = plays.find((p) => !p.alert) || plays[0];
       const sc = (p) => (p.score ? `${p.score.home}–${p.score.away}` : '');
-      const playsPanel = `<p class="lastplay">${lastPlay ? esc(lastPlay.text) : 'Waiting for the first play.'}</p>
+      const playsPanel = `<p class="lastplay">${lastPlay ? esc(lastPlay.text) : 'No plays yet.'}</p>
         <ul class="recent">${plays.filter((p) => p !== lastPlay).slice(0, 3).map((p) => `<li class="${p.alert ? 'is-alert' : ''}"><span class="sc">${sc(p)}</span><span>${esc(p.text)}</span></li>`).join('')}</ul>`;
       const rotPanel = `<div class="courts">${court(v, 'home')}${court(v, 'away')}</div>
-        <p class="note">Built from the serve order. A serving sub shows in her slot; liberos aren't tracked.</p>`;
+        <p class="note">From the serve order. Liberos not tracked.</p>`;
       const status = v.status === 'final' ? 'Final' : v.status === 'pre' ? 'Pregame' : `Set ${v.set}`;
       regions.game.innerHTML = `<div class="eyebrow">Game</div>
         <div class="scoreline">
-          <div class="sl-team home"><span class="sl-code">${esc(v.teams.home.code)}</span><span class="sl-sets" title="Sets won">${v.setsWon.home}</span></div>
+          <div class="sl-team home"><span class="sl-code">${esc(v.teams.home.code)}</span><span class="sl-sets" title="Sets won">${v.setsWon.home}<small>sets</small></span></div>
           <div class="sl-pts">${v.score.home}–${v.score.away}<small>${status}</small></div>
-          <div class="sl-team away"><span class="sl-sets" title="Sets won">${v.setsWon.away}</span><span class="sl-code">${esc(v.teams.away.code)}</span></div>
+          <div class="sl-team away"><span class="sl-sets" title="Sets won">${v.setsWon.away}<small>sets</small></span><span class="sl-code">${esc(v.teams.away.code)}</span></div>
         </div>
         <div class="serve">${serveLine}</div>
         ${alerts ? `<div class="alerts">${alerts}</div>` : ''}
@@ -900,20 +1103,32 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     }
 
     function drawFoot(v) {
+      const passed = (v.passed || []).map((h) => `<span class="chip passed" title="Back in ${h.rallies} ${h.rallies === 1 ? 'rally' : 'rallies'}">#${esc(h.uni)} ${esc(h.last)}<button data-act="unpass" data-key="${esc(h.key)}">Undo</button></span>`).join('');
       const chips = v.hidden.map((h) => `<span class="chip">#${esc(h.uni)} ${esc(h.last)}<button data-act="unhide" data-key="${esc(h.key)}">Show</button></span>`).join('');
-      regions.foot.innerHTML = (chips ? `<span>Hidden:</span>${chips}` : '') + (handlers.footNote ? `<span>${handlers.footNote}</span>` : '');
+      regions.foot.innerHTML = (passed ? `<span>Passed:</span>${passed}` : '') + (chips ? `<span>Hidden:</span>${chips}` : '') + (handlers.footNote ? `<span>${handlers.footNote}</span>` : '');
     }
 
     return {
       render(v) {
         if (!v) return;
-        drawGame(v); drawTeam(v); drawPlayers(v, 'home'); drawPlayers(v, 'away'); drawFoot(v);
+        const vals = new Map();
+        boardEl.classList.toggle('cards-5', layout !== 'list' && !!v.layout && v.layout.cards === 5);
+        boardEl.classList.toggle('layout-list', layout === 'list');
+        drawGame(v); drawTeam(v); drawPlayers(v, 'home', vals); drawPlayers(v, 'away', vals); drawFoot(v);
+        lastVals = vals;
       },
       setColors,
+      // layout: 'cards' or 'list'. stats: the two list-layout stat ids (see LIST_STATS).
+      setLayout(l, stats) {
+        layout = l === 'list' ? 'list' : 'cards';
+        if (Array.isArray(stats) && stats.length === 2) listStats = stats.slice();
+      },
+      // Freshness: 'quiet' (no change for a while) or 'stale' (a long time) tints the board; '' clears it.
+      setFreshness(f) { boardEl.classList.toggle('is-quiet', f === 'quiet'); boardEl.classList.toggle('is-stale', f === 'stale'); },
     };
   }
 
-  root.BoardView = { mountBoard, esc };
+  root.BoardView = { mountBoard, mountControls, copyText, esc, LIST_STATS, ROTATE_OPTIONS };
 })(SPB);
 
 /*
@@ -983,7 +1198,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     function colHTML(col, ci) {
       const chips = col.players.map((p, i) => {
         const on = col.starred(p);
-        return `<button class="pk-chip${on ? ' on' : ''}${p.notListed ? ' faint' : ''}" data-act="pk-toggle" data-col="${ci}" data-i="${i}" aria-pressed="${on}" title="${p.notListed ? 'On the MSU roster but not listed on this stats page' : ''}">
+        return `<button class="pk-chip${on ? ' on' : ''}${p.notListed ? ' faint' : ''}" data-act="pk-toggle" data-col="${ci}" data-i="${i}" aria-pressed="${on}" title="${p.notListed ? 'On the roster, not on this page yet' : ''}">
           <span class="pk-star" aria-hidden="true">${on ? '★' : '☆'}</span><span class="pk-num">${esc(p.uni)}</span><span class="pk-name">${esc(p.last)}</span>${p.pos ? `<span class="pk-pos">${esc(p.pos)}</span>` : ''}</button>`;
       }).join('');
       const count = col.players.filter(col.starred).length;
@@ -997,7 +1212,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       render(m) {
         model = m;
         host.innerHTML = `<div class="picker">
-          <div class="pk-head"><div><b>Impact players</b><p class="note">Star the players you build graphics for most. Each team with a star always keeps at least one starred player on the board. MSU picks carry over to every match.</p></div>
+          <div class="pk-head"><div><b>Impact players</b><p class="note">Star the players you pop most. A starred player always keeps a card. MSU stars carry over to every match.</p></div>
           <button class="tbtn" data-act="pk-close">Done</button></div>
           <div class="pk-cols">${m.cols.map(colHTML).join('')}</div></div>`;
       },
@@ -1358,27 +1573,51 @@ function startReader(SPB) {
     shadow = host.attachShadow({ mode: 'open' });
     shadow.innerHTML = `${SPB.cssHref ? `<link rel="stylesheet" href="${SPB.cssHref}">` : ''}<div class="spb-root"><div class="app">
       <header class="bar">
-        <div class="brand"><b>Stat Pop Board</b><span class="mode live">Live</span></div>
+        <div class="brand"><b>Stat Pop Board</b><span class="mode live">&#9679; Live</span></div>
         <span class="matchline" id="status">Reading this page…</span>
         <div class="transport">
           <button class="tbtn" id="swap">Swap sides</button>
           <button class="tbtn" id="close">Back to stats page</button>
         </div>
       </header>
+      <div class="ctlbar" id="ctl" aria-label="Board controls"></div>
       <div id="board"></div></div></div>`;
     applyStyles(shadow, '[hidden]{display:none!important}.spb-root{height:100%;overflow:auto;background:var(--ground,#0f1317);color:var(--ink,#edf1f4);font-family:var(--font-body,system-ui,sans-serif);font-size:15px;line-height:1.35}');
     const $ = (id) => shadow.getElementById(id);
     $('close').addEventListener('click', () => setOpen(false));
     $('swap').addEventListener('click', () => { swapped = !swapped; store.set('swap', swapped); resetEngine(); tick(true); });
+    ctl = BV.mountControls($('ctl'), {
+      get: (k, d) => store.get(k, d), set: (k, v) => store.set(k, v),
+      onChange: (s, what) => { if (what === 'rotate') lastRotateAt = Date.now(); applyLayout(); inTabView = eng.view(); if (inTabView) board.render(inTabView); },
+    });
     board = BV.mountBoard($('board'), {
       pass: (k) => { eng.pass(k); board.render(eng.view()); },
+      unpass: (k) => { eng.unpass(k); board.render(eng.view()); },
       hold: (k) => { eng.toggleHold(k); board.render(eng.view()); },
       hide: (k) => { eng.hide(k); saveHidden(); board.render(eng.view()); },
       unhide: (k) => { eng.unhide(k); saveHidden(); board.render(eng.view()); },
       color: (side, hex) => { const t = teamAt(side); if (!t) return; store.set(colorKey(t), hex); applyColors(); send(true); },
     });
     applyColors();
+    applyLayout();
   }
+  // The overlay's own copy of the board settings (this tab's storage, so they are separate from the board window's).
+  let ctl = null, lastRotateAt = Date.now();
+  function applyLayout() {
+    if (!ctl) return;
+    eng.setCards(ctl.settings.layout === '5' ? 5 : 3);
+    board.setLayout(ctl.settings.layout === 'all' ? 'list' : 'cards', ctl.settings.listStats);
+  }
+  setInterval(() => {
+    if (!ctl || !state.ok) return;
+    const rot = ctl.settings.rotate;
+    ctl.setCountdown(rot ? `next in ${Math.max(0, Math.round((rot * 1000 - (Date.now() - lastRotateAt)) / 1000))} s` : '');
+    if (rot && Date.now() - lastRotateAt >= rot * 1000) {
+      eng.rotate(); lastRotateAt = Date.now();
+      inTabView = eng.view();
+      if (overlayOpen() && inTabView) board.render(inTabView);
+    }
+  }, 1000);
   function setOpen(open) {
     if (open) buildOverlay();
     if (host) host.style.display = open ? '' : 'none';
@@ -1388,6 +1627,7 @@ function startReader(SPB) {
   }
   function resetEngine() {
     eng = PE.create(); eng.setHidden(store.get('hidden:' + eventId, [])); lastHash = ''; engLineId = lineSeq;
+    applyLayout(); lastRotateAt = Date.now();
   }
   D('here').addEventListener('click', () => setOpen(!overlayOpen()));
   document.addEventListener('keydown', (e) => {
@@ -1474,15 +1714,15 @@ function startReader(SPB) {
     let text;
     if (state.ok) {
       const s = state.raw;
-      text = diag.paused ? 'StatBroadcast paused its updates · click into the page to resume'
-        : `reading ${s.teams.home.players.length} + ${s.teams.away.players.length} players`;
+      text = diag.paused ? 'paused · click the page to resume'
+        : `${s.teams.home.players.length} + ${s.teams.away.players.length} players`;
     } else text = state.error;
     const link = linked() ? ' · board linked' : bridgeNote ? ' · ' + bridgeNote : '';
     D('dt').innerHTML = '';
     const b = document.createElement('b'); b.textContent = 'Pop board';
     D('dt').append(b, ' · ' + text + link);
     D('dt').title = text + link;
-    D('openwin').textContent = linked() ? 'Board linked' : 'Open board';
+    D('openwin').textContent = 'Open board';
   }
 
   // ---------------------------------------------------------- loop
@@ -1534,7 +1774,7 @@ function startReader(SPB) {
       if (texts.length) recordBatch(texts);
     }
     clearTimeout(debounce);
-    debounce = setTimeout(() => tick(false), 250);
+    debounce = setTimeout(() => tick(false), 100);
   }).observe(document.documentElement, { subtree: true, childList: true, characterData: true });
 
   // If the board opened this tab, say hello so it knows the reader is running.

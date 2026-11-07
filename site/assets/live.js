@@ -23,6 +23,7 @@
 
   const board = BV.mountBoard($('board'), {
     pass: (k) => { eng.pass(k); rerender(); },
+    unpass: (k) => { eng.unpass(k); rerender(); },
     hold: (k) => { eng.toggleHold(k); rerender(); },
     hide: (k) => { eng.hide(k); store.set('hidden:' + eventId, eng.hiddenKeys); rerender(); },
     unhide: (k) => { eng.unhide(k); store.set('hidden:' + eventId, eng.hiddenKeys); rerender(); },
@@ -35,6 +36,20 @@
     },
   });
   const oriented = () => (lastGood ? PE.swapSides(lastGood, swapped) : null);
+
+  // Board settings, kept in this browser: player-card layout ('3', '5' or 'all'), the two stats the list
+  // layout shows, and the auto-rotate interval in seconds (0 = off).
+  let lastRotateAt = Date.now();
+  const ctl = BV.mountControls($('ctlbar'), {
+    get: (k, d) => store.get(k, d), set: (k, v) => store.set(k, v),
+    onChange: (s, what) => { if (what === 'rotate') lastRotateAt = Date.now(); applyLayout(); rerender(); paint(); },
+  });
+  const settings = ctl.settings;
+  function applyLayout() {
+    eng.setCards(settings.layout === '5' ? 5 : 3);
+    board.setLayout(settings.layout === 'all' ? 'list' : 'cards', settings.listStats);
+  }
+  applyLayout();
   function applyStars() {
     const s = oriented();
     if (!s) return;
@@ -68,7 +83,8 @@
   function resetEngine() {
     eng = PE.create();
     eng.setHidden(store.get('hidden:' + eventId, []));
-    lastHash = ''; view = null;
+    eng.setCards(settings.layout === '5' ? 5 : 3);
+    lastHash = ''; view = null; lastRotateAt = Date.now();
   }
 
   // ---------------------------------------------------------- picker
@@ -222,18 +238,23 @@
   function paint() {
     const now = Date.now();
     const age = last ? now - lastAt : Infinity;
-    let mode = 'Waiting', cls = 'wait', conn;
+    // The mode chip carries a glyph so it reads by shape from across the room: ○ ◐ ● ‖ ▲.
+    let mode = '○ Waiting', cls = 'wait', conn, live = false;
     if (!last) {
-      conn = statsWin && !statsWin.closed ? 'Stats page opened · waiting for its reader to start' : 'Not linked to a stats page yet';
+      conn = statsWin && !statsWin.closed ? 'Stats page open · start the reader there' : 'Not linked to a stats page yet';
     } else if (age > 20000) {
-      mode = 'Stale'; conn = `No word from the stats tab for ${secs(age)} s. Is it still open?`;
+      mode = '▲ Stale'; cls = 'stale'; conn = `Stats tab silent ${secs(age)} s. Still open?`;
     } else if (!last.ok) {
-      mode = 'Linked'; cls = 'link'; conn = 'Stats tab linked · ' + (last.error || 'waiting for stats');
+      mode = '◐ Linked'; cls = 'link'; conn = 'Linked · ' + (last.error || 'waiting for stats');
     } else {
       const s = last.snap, paused = !!(last.diag && last.diag.paused);
-      mode = paused ? 'Paused' : 'Live'; cls = paused ? 'wait' : 'live';
-      conn = `${s.teams.away.code} at ${s.teams.home.code} · ${last.eventId === 'practice' ? 'practice page' : 'event ' + last.eventId} · last stat change ${secs(now - lastChangeAt)} s ago` + (paused ? ' · StatBroadcast paused' : '');
+      mode = paused ? '‖ Paused' : '● Live'; cls = paused ? 'wait' : 'live'; live = !paused && s.status === 'live';
+      conn = `${s.teams.away.code} at ${s.teams.home.code} · ${last.eventId === 'practice' ? 'practice page' : 'event ' + last.eventId} · updated ${secs(now - lastChangeAt)} s ago${paused ? ' · paused' : ''}`;
     }
+    // Freshness tint on the score: amber after 90 s without a stat change in a live set, red after 4 min.
+    const quiet = now - lastChangeAt;
+    board.setFreshness(view && live ? (quiet > 240000 ? 'stale' : quiet > 90000 ? 'quiet' : '') : '');
+    ctl.setCountdown(settings.rotate && view ? `next in ${secs(settings.rotate * 1000 - (now - lastRotateAt))} s` : '');
     $('mode').textContent = mode;
     $('mode').className = 'mode ' + cls;
     $('conn').textContent = conn;
@@ -241,15 +262,16 @@
     $('checkbtn').setAttribute('aria-pressed', String(checkOpen));
     $('picker').hidden = !pickerOpen;
     $('board').hidden = !view;
+    $('ctlbar').hidden = !view;
     $('start').hidden = !!view && !startForced;
     $('newlink').hidden = !view || startForced;
     // Notices
     const notes = [];
-    if (last && last.ok && last.diag && last.diag.paused) notes.push('StatBroadcast has paused its own live updates (the stats tab title starts with [Paused]). Click anywhere on the stats page to wake it, and press its Resume control if it shows one. The board is holding the last numbers it saw.');
-    if (view && last && !last.ok && age < 20000) notes.push('The stats page isn’t showing its box score right now. The board is holding the last numbers it saw. ' + (last.error || ''));
+    if (last && last.ok && last.diag && last.diag.paused) notes.push('StatBroadcast paused. Click the stats page to wake it (press Resume if it shows one). The board is holding the last numbers.');
+    if (view && last && !last.ok && age < 20000) notes.push('The stats page isn’t showing its box score right now. The board is holding the last numbers. ' + (last.error || ''));
     if (last && openedEvent && last.eventId !== openedEvent && last.eventId !== 'page') notes.push(`The linked stats tab is on event ${last.eventId}, not the one you opened (${openedEvent}).`);
     const readerVersion = last && last.diag && last.diag.version;
-    if (readerVersion && readerVersion !== SPB.version) notes.push(`The stats tab is running reader ${readerVersion}, but this board is ${SPB.version}. Reload the stats page and start the reader again. With Tampermonkey: open its menu, click Check for userscript updates, then reload the stats page.`);
+    if (readerVersion && readerVersion !== SPB.version) notes.push(`The stats tab is running reader ${readerVersion}, board is ${SPB.version}. Reload the stats page and start the reader again. Tampermonkey: Check for userscript updates first.`);
     $('notice').hidden = !notes.length;
     $('notice').textContent = notes.join(' ');
     if (view) {
@@ -258,7 +280,13 @@
     } else document.title = 'Stat Pop Board';
     renderCheck();
   }
-  setInterval(() => { if (eng.expireHolds()) rerender(); paint(); }, 1000);
+  setInterval(() => {
+    let changed = eng.expireHolds();
+    // Auto-rotate: every interval the unpinned cards make way for the best players not yet on the board.
+    if (settings.rotate && view && last && last.ok && Date.now() - lastRotateAt >= settings.rotate * 1000) { eng.rotate(); lastRotateAt = Date.now(); changed = true; }
+    if (changed) rerender();
+    paint();
+  }, 1000);
 
   function renderCheck() {
     $('check').hidden = !checkOpen;
