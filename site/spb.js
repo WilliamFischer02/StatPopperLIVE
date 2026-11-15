@@ -1,11 +1,11 @@
-/* Stat Pop Board 0.5.1: reads only the page you have open and shares it with the board window on this computer. */
+/* Stat Pop Board 0.5.2: reads only the page you have open and shares it with the board window on this computer. */
 (function () {
 'use strict';
 if (window.SPB && window.SPB.version) { if (!window.__spbNoReader && window.SPB.show) window.SPB.show(); return; }
 var cs = document.currentScript;
-var SPB = { version: "0.5.1" };
+var SPB = { version: "0.5.2" };
 SPB.origin = window.__spbOrigin || (cs && cs.src ? new URL(cs.src, location.href).origin : null) || "https://stat-pop-board.vercel.app";
-SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.5.1' : null;
+SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.5.2' : null;
 SPB.fontsHref = "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap";
 SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos":"OH"},{"uni":"5","first":"Keely","last":"Culler","pos":"OH"},{"uni":"6","first":"Teagan","last":"Jaynes","pos":"S"},{"uni":"7","first":"Lauren","last":"Schloe","pos":"MB/OPP"},{"uni":"9","first":"Maggie","last":"Rhew","pos":"S/DS"},{"uni":"11","first":"Elli","last":"Esko","pos":"OH"},{"uni":"12","first":"Afton","last":"Thomsen","pos":"L/DS"},{"uni":"13","first":"Jolene","last":"Green Ewen","pos":"MB"},{"uni":"14","first":"Taylor","last":"McDonald","pos":"MH/OPP"},{"uni":"15","first":"Teya","last":"Yeomans","pos":"OH"},{"uni":"16","first":"Haven","last":"Rich","pos":"L/DS"},{"uni":"17","first":"Alice","last":"Steman","pos":"MB"},{"uni":"18","first":"Karli","last":"Heidemann","pos":"OH"},{"uni":"22","first":"Joelie","last":"Spelts","pos":"MB"},{"uni":"23","first":"Elli","last":"Tufto","pos":"OH"},{"uni":"45","first":"Nicolette","last":"Noble","pos":"L/DS"}] };
 /*
@@ -19,6 +19,8 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
  *     setsWon:{home:0,away:0},
  *     teams:{ home:{code,name,players:[P],totals?:P,extra?:X}, away:{...} } }
  *   P = { uni, first, last, min, fgm, fga, tpm, tpa, ftm, fta, oreb, dreb, reb, ast, stl, blk, to, pf, pts }
+ *   Pregame only (status 'pre', read from the page's lineup and roster tables): P may be
+ *   { uni, first, last, pos?, starter?, season:{gp,ppg,rpg,apg} } with no game stats.
  *   X = { paint, offTo, second, fast, bench }   (optional team extras, when the page lists them)
  *
  * Cadence: volleyball counts rallies. Basketball has no rallies, so the engine's counter advances once
@@ -46,6 +48,9 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     q.fgPct = q.fga > 0 ? q.fgm / q.fga : null;
     q.tpPct = q.tpa > 0 ? q.tpm / q.tpa : null;
     q.ftPct = q.fta > 0 ? q.ftm / q.fta : null;
+    // Season averages and the starter mark, only on a pregame roster (the page has no box score before tip-off).
+    if (p.season) q.season = p.season;
+    if (p.starter) q.starter = true;
     return q;
   }
 
@@ -265,7 +270,9 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
   });
 
   const sigOf = (s) => JSON.stringify([s.status, s.period, !!s.intermission, s.score,
-    SIDES.map((side) => s.teams[side].players.map((p) => FIELDS.map((f) => num(p[f])).join(',')).join(';'))]);
+    SIDES.map((side) => s.teams[side].players.map((p) => FIELDS.map((f) => num(p[f])).join(',')).join(';')),
+    // Pregame: the roster itself is the news (the starting lineups appear a while after the rosters).
+    s.status === 'pre' ? SIDES.map((side) => s.teams[side].players.map((p) => p.uni + (p.starter ? '*' : '')).join(',')) : 0]);
 
   const teamFouls = (s, side) => {
     const t = s.teams[side];
@@ -607,6 +614,11 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     pinWorthy: (p, N, pin) => (N[pin.stat] > 0) || (['tpm', 'stl', 'blk'].includes(pin.stat) && p[pin.stat] >= 2),
     pinWhen: (d) => (d === 0 ? 'Just now · ' : 'Moments ago · '),
     passText: 'Skip this player for the next few minutes',
+    // Pregame: a card with no game stats shows the player's season averages, and a side's cards are its
+    // starters (once the page lists them), then its top scorers.
+    prePops: (p) => (p.season && p.season.gp > 0 ? [{ id: 'season', name: 'Season Averages', uses: [], score: 0,
+      parts: [{ v: num(p.season.ppg).toFixed(1), l: 'PPG' }, { v: num(p.season.rpg).toFixed(1), l: 'RPG' }, { v: num(p.season.apg).toFixed(1), l: 'APG' }] }] : []),
+    preRank: (p) => (p.starter ? 1000 : 0) + (p.season ? num(p.season.ppg) : 0),
     unit: ['play', 'plays'],
   };
   root.PopBasketball = api;
@@ -1201,6 +1213,8 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
           if (!covered(x, pops)) pops.push(x);
         }
       }
+      // Pregame (basketball roster): nothing to pop yet, so show what the sport has for a player with no stats.
+      if (!pops.length && SP.prePops) pops = SP.prePops(p);
       pops = pops.map((x, i) => {
         const live = !!force && x.uses.includes(force);
         return { id: x.id, name: x.name, parts: x.parts, score: x.score, best: i === 0, live, dim: !live && x.score < 0.8 };
@@ -1288,7 +1302,8 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       // checked before first serve. Once the set starts this never runs: cards then come only from stats.
       if (s.status === 'pre' && chosen.length < MAX) {
         const have = new Set(chosen.map((c) => c.key));
-        for (const c of pool) {
+        const order = SP.preRank ? pool.slice().sort((a, b) => SP.preRank(b.p) - SP.preRank(a.p)) : pool;
+        for (const c of order) {
           if (chosen.length >= MAX) break;
           if (!have.has(c.key)) { chosen.push(c); have.add(c.key); }
         }
@@ -2084,7 +2099,7 @@ function startReader(SPB) {
     if (h === 'FTM') return 'ftm';
     if (h === 'FTA') return 'fta';
     if (/^FG(M?[-\/](FG)?A)?$/.test(h)) return 'fg';
-    if (/^3-?(PT|FG|P)?(FG)?(M?[-\/](3P|3PT|FG)?A)?$/.test(h) || h === '3PTFG') return 'tp';
+    if (/^3-?(PT|FG|P|F)?(FG)?(M?[-\/](3P|3PT|FG|3F)?A)?$/.test(h) || h === '3PTFG') return 'tp';
     if (/^FT(M?[-\/](FT)?A)?$/.test(h)) return 'ft';
     if (/^(OREB|OFF|OR|ORB)$/.test(h)) return 'oreb';
     if (/^(DREB|DEF|DR|DRB)$/.test(h)) return 'dreb';
@@ -2092,7 +2107,7 @@ function startReader(SPB) {
     if (/^(ORB|OR|OREB|OFF|O)[-\/](DRB|DR|DREB|DEF|D)$/.test(h)) return 'od';
     if (/^(A|AST|AS|ASST)$/.test(h)) return 'ast';
     if (/^(TO|TOV|TOS)$/.test(h)) return 'to';
-    if (/^(BLK|BLKS|BK|BL|BS)$/.test(h)) return 'blk';
+    if (/^(BLK|BLKS|BK|BL|BS|B)$/.test(h)) return 'blk';
     if (/^(STL|STLS|ST)$/.test(h)) return 'stl';
     if (/^(PF|F|FLS|FOULS)$/.test(h)) return 'pf';
     if (/^(PTS|TP|POINTS)$/.test(h)) return 'pts';
@@ -2138,9 +2153,16 @@ function startReader(SPB) {
     },
   };
 
+  const SUFFIX = /^(jr|sr|ii|iii|iv|v)\.?$/i;
   function splitName(raw) {
     let s = raw.replace(/\*/g, '').replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim().replace(/^\d+\s+/, '');
-    if (s.includes(',')) { const [last, first] = s.split(',').map((x) => x.trim()); return { last, first: first || '' }; }
+    if (s.includes(',')) {
+      // "Last,First", and "Price, Jr.,Aaron" (seen 2026-11-15): a suffix between the commas belongs to the last name.
+      const bits = s.split(',').map((x) => x.trim()).filter(Boolean);
+      let last = bits[0] || '', first = bits.slice(1).join(' ');
+      if (bits.length > 2 && SUFFIX.test(bits[1])) { last = bits[0] + ' ' + bits[1]; first = bits.slice(2).join(' '); }
+      return { last, first };
+    }
     const parts = s.split(' ');
     return parts.length === 1 ? { last: parts[0], first: '' } : { first: parts.slice(0, -1).join(' '), last: parts[parts.length - 1] };
   }
@@ -2227,6 +2249,71 @@ function startReader(SPB) {
       unassigned.forEach((f, i) => { f.side = order[i] || null; });
     }
     return found;
+  }
+
+  // Pregame basketball (seen 2026-11-15, Cal Poly at MSU): before tip-off the page has no box score. It shows
+  // a "SEASON COMPARISON" table and, per team, a "CAL POLY ROSTER" table and later a "CAL POLY STARTING LINEUP"
+  // table, both with the columns POS # NAME CLASS HEIGHT GP PPG RPG APG (the lineup ends in a "Team Averages"
+  // row). They are read as players with no game stats plus their season averages, so the board can show a
+  // pregame preview (starters first) and stars can be set early.
+  const ROSTER_COLS = { POS: 'pos', CLASS: 'cls', CL: 'cls', YR: 'cls', HEIGHT: 'ht', HT: 'ht', GP: 'gp', PPG: 'ppg', RPG: 'rpg', APG: 'apg' };
+  function rosterKey(h) {
+    h = h.replace(/\s+/g, '').replace(/\.$/, '');
+    if (/^(#|##|NO|NUM)$/.test(h)) return 'uni';
+    if (/^(PLAYERS?|NAME|ATHLETE)$/.test(h)) return 'name';
+    return ROSTER_COLS[h] || null;
+  }
+  const ROSTER_HEAD = /^(.*?)\s+(roster|starting\s+line-?up|starters|line-?up)$/i;
+  function readRosters(title, names) {
+    const found = [];
+    for (const table of document.querySelectorAll('table')) {
+      if (ours(table)) continue;
+      const hm = headerMap(table, rosterKey);
+      if (!hm || hm.map.uni == null || hm.map.name == null || hm.map.ppg == null) continue;
+      const bits = contextBits(table);
+      const rm = bits.map((b) => b.match(ROSTER_HEAD)).find(Boolean);
+      const team = rm ? rm[1].trim() : null;
+      const lineup = !!rm && !/roster/i.test(rm[2]);
+      const txt = (cells, k) => (hm.map[k] == null || !cells[hm.map[k]] ? '' : cellText(cells[hm.map[k]]));
+      const players = [], skipped = [];
+      const rows = [...table.rows];
+      for (const tr of rows.slice(rows.indexOf(hm.tr) + 1)) {
+        const cells = expandRow(tr);
+        const raw = txt(cells, 'name');
+        const um = txt(cells, 'uni').match(/^#?(\d{1,2})(?!\d)/);
+        const nm = splitName(raw);
+        if (!um || !raw || NON_PLAYER.test(raw.replace(/^[^A-Za-z0-9]+/, '')) || !/\p{L}/u.test(nm.last)) {
+          const label = raw || cells.map(cellText).find((x) => /[A-Za-z]{2}/.test(x)) || '';
+          if (label && skipped.length < 6) skipped.push(label.slice(0, 30));
+          continue;
+        }
+        const f = (k) => parseFloat(txt(cells, k)) || 0;
+        const p = { uni: um[1], first: nm.first, last: nm.last, season: { gp: f('gp'), ppg: f('ppg'), rpg: f('rpg'), apg: f('apg') } };
+        if (txt(cells, 'pos')) p.pos = txt(cells, 'pos');
+        if (lineup) p.starter = true;
+        players.push(p);
+      }
+      if (!players.length) continue;
+      let side = null;
+      for (const b of team ? [team].concat(bits) : bits) {
+        const is = (sd, nm2) => (title && (mentions(b, title[sd].code) || (IP.isMSU({ code: title[sd].code }) && IP.isMSU({ name: b })))) || mentions(b, nm2);
+        const h = is('home', names.home), v = is('vis', names.vis);
+        if (h && !v) { side = 'home'; break; }
+        if (v && !h) { side = 'vis'; break; }
+      }
+      found.push({ table, side, team, lineup, players, totals: null, skipped, headers: Object.keys(hm.map), ctx: bits.join(' | ').slice(0, 140) });
+    }
+    // A team's lineup and roster tables share a side. Teams that the title could not place take the free
+    // sides in page order (visitors first, as the page lays them out).
+    const groupOf = (f) => (f.team ? 't:' + f.team.toUpperCase() : 'i:' + found.indexOf(f));
+    const sideOf = new Map();
+    for (const f of found) if (f.side && !sideOf.has(groupOf(f))) sideOf.set(groupOf(f), f.side);
+    const free = ['vis', 'home'].filter((sd) => ![...sideOf.values()].includes(sd));
+    for (const f of found) {
+      if (!sideOf.has(groupOf(f))) sideOf.set(groupOf(f), free.shift() || null);
+      f.side = sideOf.get(groupOf(f));
+    }
+    return found.filter((f) => f.side);
   }
 
   function readSetsWon(title) {
@@ -2355,19 +2442,27 @@ function startReader(SPB) {
       const bbt = readTables(title, names, 'bb');
       if (bbt.length) { tables = bbt; sport = 'bb'; }
     }
+    // No box score yet: before tip-off the basketball page lists each team's lineup and roster instead.
+    let roster = false;
+    if (!tables.length) {
+      const ros = readRosters(title, names);
+      if (ros.length) { tables = ros; sport = 'bb'; roster = true; }
+    }
+    if (roster) for (const sd of ['vis', 'home']) { const t = tables.find((x) => x.side === sd && x.team); if (t && !names[sd]) names[sd] = t.team; }
     tables.forEach((t) => statTables.add(t.table));
+    diag.roster = roster;
     diag.title = document.title;
     diag.parsedTitle = title;
     diag.paused = titlePaused(document.title);
     diag.names = names;
     diag.sport = tables.length ? sport : null;
-    diag.tables = tables.map((t) => ({ side: t.side, players: t.players.length, totals: !!t.totals, headers: t.headers.join(' '), skipped: t.skipped, context: t.ctx }));
+    diag.tables = tables.map((t) => ({ side: t.side, ...(roster ? { roster: t.lineup ? 'lineup' : 'roster', team: t.team } : {}), players: t.players.length, totals: !!t.totals, headers: t.headers.join(' '), skipped: t.skipped, context: t.ctx }));
     diag.ignoredTables = ignoredTables.slice();
     diag.pageTables = describeTables();
     // Basketball safety net: if the tab title is not in the form this reader knows, take the score from
     // the box score itself (each team's points) and the names from the page heading. The period and clock
     // are then unknown, and the engine estimates how far along the game is from the score.
-    if (!title && sport === 'bb' && bothSides(tables)) {
+    if (!title && sport === 'bb' && !roster && bothSides(tables)) {
       const pts = (side) => {
         const ts = tables.filter((t) => t.side === side);
         const tot = ts.map((t) => t.totals && t.totals.pts).find((v) => v != null);
@@ -2377,6 +2472,18 @@ function startReader(SPB) {
       title = { vis: { code: code(names.vis, 'AWAY'), score: pts('vis') }, home: { code: code(names.home, 'HOME'), score: pts('home') },
         final: false, set: null, raw: '', paused: false, fromBox: true };
       diag.parsedTitle = title;
+    }
+    // Pregame rosters under a tab title this reader does not know: 0-0, teams named from the table headings.
+    if (!title && roster && bothSides(tables)) {
+      const code = (name, d) => (name ? String(name).trim().slice(0, 12) : d);
+      title = { vis: { code: code(names.vis, 'AWAY'), score: 0 }, home: { code: code(names.home, 'HOME'), score: 0 },
+        final: false, set: null, raw: '', paused: false, fromRoster: true };
+      diag.parsedTitle = title;
+    }
+    // Rosters only, but the game is under way or over: the box score is on another view of the page.
+    // Sending the roster then would zero every stat line, so wait for the box score instead.
+    if (title && roster && (title.final || title.home.score + title.vis.score > 0)) {
+      return { error: 'Waiting for the box score. Switch the stats page to its box score view.' };
     }
     if (!title) return { error: 'Waiting for the score in the tab title (accept the terms on the stats page if you haven’t).' };
     if (!bothSides(tables)) {
@@ -2390,7 +2497,7 @@ function startReader(SPB) {
       }
       return { code: title[side].code, name: (side === 'home' ? names.home : names.vis) || title[side].code, players: [...map.values()], totals };
     };
-    rosterWords = tables.flatMap((t) => t.players.map((p) => p.last.toLowerCase())).filter((w) => w.length > 2);
+    rosterWords = tables.flatMap((t) => t.players.map((p) => p.last.toLowerCase().replace(/\s+(jr|sr|ii|iii|iv|v)\.?$/, ''))).filter((w) => w.length > 2);
     if (sport === 'bb') {
       const st = parseBBStatus(title.raw);
       if (st.periods) bbPeriods = st.periods;
@@ -2592,7 +2699,7 @@ function startReader(SPB) {
   }
   function diagSummary() {
     return { version: VERSION, eventId, url: location.href.split('#')[0], title: diag.title, parsedTitle: diag.parsedTitle,
-      names: diag.names, sport: diag.sport, status: diag.status, tables: diag.tables, ignoredTables: diag.ignoredTables, pageTables: diag.pageTables,
+      names: diag.names, sport: diag.sport, roster: !!diag.roster, status: diag.status, tables: diag.tables, ignoredTables: diag.ignoredTables, pageTables: diag.pageTables,
       error: state.error, linesCaptured: lineSeq, paused: !!diag.paused };
   }
   function send(force) {

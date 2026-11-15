@@ -129,7 +129,7 @@ function startReader(SPB) {
     if (h === 'FTM') return 'ftm';
     if (h === 'FTA') return 'fta';
     if (/^FG(M?[-\/](FG)?A)?$/.test(h)) return 'fg';
-    if (/^3-?(PT|FG|P)?(FG)?(M?[-\/](3P|3PT|FG)?A)?$/.test(h) || h === '3PTFG') return 'tp';
+    if (/^3-?(PT|FG|P|F)?(FG)?(M?[-\/](3P|3PT|FG|3F)?A)?$/.test(h) || h === '3PTFG') return 'tp';
     if (/^FT(M?[-\/](FT)?A)?$/.test(h)) return 'ft';
     if (/^(OREB|OFF|OR|ORB)$/.test(h)) return 'oreb';
     if (/^(DREB|DEF|DR|DRB)$/.test(h)) return 'dreb';
@@ -137,7 +137,7 @@ function startReader(SPB) {
     if (/^(ORB|OR|OREB|OFF|O)[-\/](DRB|DR|DREB|DEF|D)$/.test(h)) return 'od';
     if (/^(A|AST|AS|ASST)$/.test(h)) return 'ast';
     if (/^(TO|TOV|TOS)$/.test(h)) return 'to';
-    if (/^(BLK|BLKS|BK|BL|BS)$/.test(h)) return 'blk';
+    if (/^(BLK|BLKS|BK|BL|BS|B)$/.test(h)) return 'blk';
     if (/^(STL|STLS|ST)$/.test(h)) return 'stl';
     if (/^(PF|F|FLS|FOULS)$/.test(h)) return 'pf';
     if (/^(PTS|TP|POINTS)$/.test(h)) return 'pts';
@@ -183,9 +183,16 @@ function startReader(SPB) {
     },
   };
 
+  const SUFFIX = /^(jr|sr|ii|iii|iv|v)\.?$/i;
   function splitName(raw) {
     let s = raw.replace(/\*/g, '').replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim().replace(/^\d+\s+/, '');
-    if (s.includes(',')) { const [last, first] = s.split(',').map((x) => x.trim()); return { last, first: first || '' }; }
+    if (s.includes(',')) {
+      // "Last,First", and "Price, Jr.,Aaron" (seen 2026-11-15): a suffix between the commas belongs to the last name.
+      const bits = s.split(',').map((x) => x.trim()).filter(Boolean);
+      let last = bits[0] || '', first = bits.slice(1).join(' ');
+      if (bits.length > 2 && SUFFIX.test(bits[1])) { last = bits[0] + ' ' + bits[1]; first = bits.slice(2).join(' '); }
+      return { last, first };
+    }
     const parts = s.split(' ');
     return parts.length === 1 ? { last: parts[0], first: '' } : { first: parts.slice(0, -1).join(' '), last: parts[parts.length - 1] };
   }
@@ -272,6 +279,71 @@ function startReader(SPB) {
       unassigned.forEach((f, i) => { f.side = order[i] || null; });
     }
     return found;
+  }
+
+  // Pregame basketball (seen 2026-11-15, Cal Poly at MSU): before tip-off the page has no box score. It shows
+  // a "SEASON COMPARISON" table and, per team, a "CAL POLY ROSTER" table and later a "CAL POLY STARTING LINEUP"
+  // table, both with the columns POS # NAME CLASS HEIGHT GP PPG RPG APG (the lineup ends in a "Team Averages"
+  // row). They are read as players with no game stats plus their season averages, so the board can show a
+  // pregame preview (starters first) and stars can be set early.
+  const ROSTER_COLS = { POS: 'pos', CLASS: 'cls', CL: 'cls', YR: 'cls', HEIGHT: 'ht', HT: 'ht', GP: 'gp', PPG: 'ppg', RPG: 'rpg', APG: 'apg' };
+  function rosterKey(h) {
+    h = h.replace(/\s+/g, '').replace(/\.$/, '');
+    if (/^(#|##|NO|NUM)$/.test(h)) return 'uni';
+    if (/^(PLAYERS?|NAME|ATHLETE)$/.test(h)) return 'name';
+    return ROSTER_COLS[h] || null;
+  }
+  const ROSTER_HEAD = /^(.*?)\s+(roster|starting\s+line-?up|starters|line-?up)$/i;
+  function readRosters(title, names) {
+    const found = [];
+    for (const table of document.querySelectorAll('table')) {
+      if (ours(table)) continue;
+      const hm = headerMap(table, rosterKey);
+      if (!hm || hm.map.uni == null || hm.map.name == null || hm.map.ppg == null) continue;
+      const bits = contextBits(table);
+      const rm = bits.map((b) => b.match(ROSTER_HEAD)).find(Boolean);
+      const team = rm ? rm[1].trim() : null;
+      const lineup = !!rm && !/roster/i.test(rm[2]);
+      const txt = (cells, k) => (hm.map[k] == null || !cells[hm.map[k]] ? '' : cellText(cells[hm.map[k]]));
+      const players = [], skipped = [];
+      const rows = [...table.rows];
+      for (const tr of rows.slice(rows.indexOf(hm.tr) + 1)) {
+        const cells = expandRow(tr);
+        const raw = txt(cells, 'name');
+        const um = txt(cells, 'uni').match(/^#?(\d{1,2})(?!\d)/);
+        const nm = splitName(raw);
+        if (!um || !raw || NON_PLAYER.test(raw.replace(/^[^A-Za-z0-9]+/, '')) || !/\p{L}/u.test(nm.last)) {
+          const label = raw || cells.map(cellText).find((x) => /[A-Za-z]{2}/.test(x)) || '';
+          if (label && skipped.length < 6) skipped.push(label.slice(0, 30));
+          continue;
+        }
+        const f = (k) => parseFloat(txt(cells, k)) || 0;
+        const p = { uni: um[1], first: nm.first, last: nm.last, season: { gp: f('gp'), ppg: f('ppg'), rpg: f('rpg'), apg: f('apg') } };
+        if (txt(cells, 'pos')) p.pos = txt(cells, 'pos');
+        if (lineup) p.starter = true;
+        players.push(p);
+      }
+      if (!players.length) continue;
+      let side = null;
+      for (const b of team ? [team].concat(bits) : bits) {
+        const is = (sd, nm2) => (title && (mentions(b, title[sd].code) || (IP.isMSU({ code: title[sd].code }) && IP.isMSU({ name: b })))) || mentions(b, nm2);
+        const h = is('home', names.home), v = is('vis', names.vis);
+        if (h && !v) { side = 'home'; break; }
+        if (v && !h) { side = 'vis'; break; }
+      }
+      found.push({ table, side, team, lineup, players, totals: null, skipped, headers: Object.keys(hm.map), ctx: bits.join(' | ').slice(0, 140) });
+    }
+    // A team's lineup and roster tables share a side. Teams that the title could not place take the free
+    // sides in page order (visitors first, as the page lays them out).
+    const groupOf = (f) => (f.team ? 't:' + f.team.toUpperCase() : 'i:' + found.indexOf(f));
+    const sideOf = new Map();
+    for (const f of found) if (f.side && !sideOf.has(groupOf(f))) sideOf.set(groupOf(f), f.side);
+    const free = ['vis', 'home'].filter((sd) => ![...sideOf.values()].includes(sd));
+    for (const f of found) {
+      if (!sideOf.has(groupOf(f))) sideOf.set(groupOf(f), free.shift() || null);
+      f.side = sideOf.get(groupOf(f));
+    }
+    return found.filter((f) => f.side);
   }
 
   function readSetsWon(title) {
@@ -400,19 +472,27 @@ function startReader(SPB) {
       const bbt = readTables(title, names, 'bb');
       if (bbt.length) { tables = bbt; sport = 'bb'; }
     }
+    // No box score yet: before tip-off the basketball page lists each team's lineup and roster instead.
+    let roster = false;
+    if (!tables.length) {
+      const ros = readRosters(title, names);
+      if (ros.length) { tables = ros; sport = 'bb'; roster = true; }
+    }
+    if (roster) for (const sd of ['vis', 'home']) { const t = tables.find((x) => x.side === sd && x.team); if (t && !names[sd]) names[sd] = t.team; }
     tables.forEach((t) => statTables.add(t.table));
+    diag.roster = roster;
     diag.title = document.title;
     diag.parsedTitle = title;
     diag.paused = titlePaused(document.title);
     diag.names = names;
     diag.sport = tables.length ? sport : null;
-    diag.tables = tables.map((t) => ({ side: t.side, players: t.players.length, totals: !!t.totals, headers: t.headers.join(' '), skipped: t.skipped, context: t.ctx }));
+    diag.tables = tables.map((t) => ({ side: t.side, ...(roster ? { roster: t.lineup ? 'lineup' : 'roster', team: t.team } : {}), players: t.players.length, totals: !!t.totals, headers: t.headers.join(' '), skipped: t.skipped, context: t.ctx }));
     diag.ignoredTables = ignoredTables.slice();
     diag.pageTables = describeTables();
     // Basketball safety net: if the tab title is not in the form this reader knows, take the score from
     // the box score itself (each team's points) and the names from the page heading. The period and clock
     // are then unknown, and the engine estimates how far along the game is from the score.
-    if (!title && sport === 'bb' && bothSides(tables)) {
+    if (!title && sport === 'bb' && !roster && bothSides(tables)) {
       const pts = (side) => {
         const ts = tables.filter((t) => t.side === side);
         const tot = ts.map((t) => t.totals && t.totals.pts).find((v) => v != null);
@@ -422,6 +502,18 @@ function startReader(SPB) {
       title = { vis: { code: code(names.vis, 'AWAY'), score: pts('vis') }, home: { code: code(names.home, 'HOME'), score: pts('home') },
         final: false, set: null, raw: '', paused: false, fromBox: true };
       diag.parsedTitle = title;
+    }
+    // Pregame rosters under a tab title this reader does not know: 0-0, teams named from the table headings.
+    if (!title && roster && bothSides(tables)) {
+      const code = (name, d) => (name ? String(name).trim().slice(0, 12) : d);
+      title = { vis: { code: code(names.vis, 'AWAY'), score: 0 }, home: { code: code(names.home, 'HOME'), score: 0 },
+        final: false, set: null, raw: '', paused: false, fromRoster: true };
+      diag.parsedTitle = title;
+    }
+    // Rosters only, but the game is under way or over: the box score is on another view of the page.
+    // Sending the roster then would zero every stat line, so wait for the box score instead.
+    if (title && roster && (title.final || title.home.score + title.vis.score > 0)) {
+      return { error: 'Waiting for the box score. Switch the stats page to its box score view.' };
     }
     if (!title) return { error: 'Waiting for the score in the tab title (accept the terms on the stats page if you haven’t).' };
     if (!bothSides(tables)) {
@@ -435,7 +527,7 @@ function startReader(SPB) {
       }
       return { code: title[side].code, name: (side === 'home' ? names.home : names.vis) || title[side].code, players: [...map.values()], totals };
     };
-    rosterWords = tables.flatMap((t) => t.players.map((p) => p.last.toLowerCase())).filter((w) => w.length > 2);
+    rosterWords = tables.flatMap((t) => t.players.map((p) => p.last.toLowerCase().replace(/\s+(jr|sr|ii|iii|iv|v)\.?$/, ''))).filter((w) => w.length > 2);
     if (sport === 'bb') {
       const st = parseBBStatus(title.raw);
       if (st.periods) bbPeriods = st.periods;
@@ -637,7 +729,7 @@ function startReader(SPB) {
   }
   function diagSummary() {
     return { version: VERSION, eventId, url: location.href.split('#')[0], title: diag.title, parsedTitle: diag.parsedTitle,
-      names: diag.names, sport: diag.sport, status: diag.status, tables: diag.tables, ignoredTables: diag.ignoredTables, pageTables: diag.pageTables,
+      names: diag.names, sport: diag.sport, roster: !!diag.roster, status: diag.status, tables: diag.tables, ignoredTables: diag.ignoredTables, pageTables: diag.pageTables,
       error: state.error, linesCaptured: lineSeq, paused: !!diag.paused };
   }
   function send(force) {
