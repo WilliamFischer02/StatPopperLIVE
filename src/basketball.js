@@ -291,9 +291,21 @@
     // A new period: close the old one out (for the period summary line) and start the foul count again
     // (overtime carries the last regulation period's fouls).
     if (cur.period > prev.period && prev.period > 0) {
-      closePeriod(ctx, s, prev);
-      b.periodStart = { period: cur.period, totals: prev.totals, exact: true };
-      if (cur.period <= P) { b.foulBase = { fouls: { home: prev.totals.home.pf, away: prev.totals.away.pf }, exact: true }; b.bonusAt = { home: null, away: null }; }
+      // The break was only seen if this update is a small step from the last one. After a jump (the page
+      // was paused over the break, or a different part of the game was loaded) the last reading is not
+      // the end of the old period, so the new period's fouls and the old period's summary are unknown.
+      const jump = cur.period - prev.period > 1
+        || Math.abs(cur.score.home + cur.score.away - prev.score.home - prev.score.away) > 8
+        || Math.abs(fouls.home + fouls.away - prev.totals.home.pf - prev.totals.away.pf) > 3;
+      if (jump) {
+        b.periodStart = { period: cur.period, totals, exact: false };
+        b.foulBase = { fouls: { home: 0, away: 0 }, exact: false };
+        b.bonusAt = { home: null, away: null };
+      } else {
+        closePeriod(ctx, s, prev);
+        b.periodStart = { period: cur.period, totals: prev.totals, exact: true };
+        if (cur.period <= P) { b.foulBase = { fouls: { home: prev.totals.home.pf, away: prev.totals.away.pf }, exact: true }; b.bonusAt = { home: null, away: null }; }
+      }
     } else if (s.intermission && (!b.finished || b.finished.period !== cur.period)) {
       closePeriod(ctx, s, cur);
     }

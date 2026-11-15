@@ -1,8 +1,9 @@
-# Handoff: status as of 2026-11-15 (v0.5.0)
+# Handoff: status as of 2026-11-15 (v0.5.1)
 
 ## TL;DR
 
 - **v0.5.0 (Nov 15): basketball.** William has a basketball broadcast today and asked for full basketball support with the sport detected automatically. Built: `src/basketball.js` (pops, runs, fouls and bonus, hot hand, alerts, leaders), a sport switch in the engine, basketball box and title reading in the reader, per-sport list stats and stars, `/practice-bb`, a basketball mock and tests (Node basketball test; e2e is 54 checks). Volleyball replay output is byte-identical to v0.4.1.
+- **v0.5.1 (Nov 15, game-day check).** CI on the v0.5.0 PR failed twice. One cause was real: if the reader's readings jumped across a period break (seen at tip-off, next seen mid-second-half), the engine took the stale reading as the end of the period, so whole-game team fouls were shown as this half's and a bonus could be claimed wrongly. `track` in `basketball.js` now treats a period change that arrives with a jump (more than one period, more than 8 combined points, or more than 3 combined fouls) as unseen: fouls fall back to whole-game `pf`, no bonus, no period summary. The other was a Playwright 1.47 `wait_for_url` miss in the e2e test (replaced with `wait_for_function`).
 - **Basketball has never run on a real StatBroadcast page.** The box-score headers, the tab title's wording and the play-by-play wording are all guesses with fallbacks. **First job after the Nov 15 game: get Reader check → Copy for Claude from the real basketball page** (it now includes `pageTables`, the first rows of every table) and fit `bbKey`, `parseBBStatus` and `parsePlay` to it. Save it under `test/` as a fixture.
 
 - **v0.4.1 (Nov 7, 2 pm).** The in-tab "Show here" overlay has the same Cards / Show / Rotate controls; Pass lists the player in the footer with Undo; clicking any pop line or team line copies it. e2e is 38 checks.

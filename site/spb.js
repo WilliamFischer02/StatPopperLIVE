@@ -1,11 +1,11 @@
-/* Stat Pop Board 0.5.0: reads only the page you have open and shares it with the board window on this computer. */
+/* Stat Pop Board 0.5.1: reads only the page you have open and shares it with the board window on this computer. */
 (function () {
 'use strict';
 if (window.SPB && window.SPB.version) { if (!window.__spbNoReader && window.SPB.show) window.SPB.show(); return; }
 var cs = document.currentScript;
-var SPB = { version: "0.5.0" };
+var SPB = { version: "0.5.1" };
 SPB.origin = window.__spbOrigin || (cs && cs.src ? new URL(cs.src, location.href).origin : null) || "https://stat-pop-board.vercel.app";
-SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.5.0' : null;
+SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.5.1' : null;
 SPB.fontsHref = "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap";
 SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos":"OH"},{"uni":"5","first":"Keely","last":"Culler","pos":"OH"},{"uni":"6","first":"Teagan","last":"Jaynes","pos":"S"},{"uni":"7","first":"Lauren","last":"Schloe","pos":"MB/OPP"},{"uni":"9","first":"Maggie","last":"Rhew","pos":"S/DS"},{"uni":"11","first":"Elli","last":"Esko","pos":"OH"},{"uni":"12","first":"Afton","last":"Thomsen","pos":"L/DS"},{"uni":"13","first":"Jolene","last":"Green Ewen","pos":"MB"},{"uni":"14","first":"Taylor","last":"McDonald","pos":"MH/OPP"},{"uni":"15","first":"Teya","last":"Yeomans","pos":"OH"},{"uni":"16","first":"Haven","last":"Rich","pos":"L/DS"},{"uni":"17","first":"Alice","last":"Steman","pos":"MB"},{"uni":"18","first":"Karli","last":"Heidemann","pos":"OH"},{"uni":"22","first":"Joelie","last":"Spelts","pos":"MB"},{"uni":"23","first":"Elli","last":"Tufto","pos":"OH"},{"uni":"45","first":"Nicolette","last":"Noble","pos":"L/DS"}] };
 /*
@@ -301,9 +301,21 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     // A new period: close the old one out (for the period summary line) and start the foul count again
     // (overtime carries the last regulation period's fouls).
     if (cur.period > prev.period && prev.period > 0) {
-      closePeriod(ctx, s, prev);
-      b.periodStart = { period: cur.period, totals: prev.totals, exact: true };
-      if (cur.period <= P) { b.foulBase = { fouls: { home: prev.totals.home.pf, away: prev.totals.away.pf }, exact: true }; b.bonusAt = { home: null, away: null }; }
+      // The break was only seen if this update is a small step from the last one. After a jump (the page
+      // was paused over the break, or a different part of the game was loaded) the last reading is not
+      // the end of the old period, so the new period's fouls and the old period's summary are unknown.
+      const jump = cur.period - prev.period > 1
+        || Math.abs(cur.score.home + cur.score.away - prev.score.home - prev.score.away) > 8
+        || Math.abs(fouls.home + fouls.away - prev.totals.home.pf - prev.totals.away.pf) > 3;
+      if (jump) {
+        b.periodStart = { period: cur.period, totals, exact: false };
+        b.foulBase = { fouls: { home: 0, away: 0 }, exact: false };
+        b.bonusAt = { home: null, away: null };
+      } else {
+        closePeriod(ctx, s, prev);
+        b.periodStart = { period: cur.period, totals: prev.totals, exact: true };
+        if (cur.period <= P) { b.foulBase = { fouls: { home: prev.totals.home.pf, away: prev.totals.away.pf }, exact: true }; b.bonusAt = { home: null, away: null }; }
+      }
     } else if (s.intermission && (!b.finished || b.finished.period !== cur.period)) {
       closePeriod(ctx, s, cur);
     }

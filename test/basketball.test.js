@@ -128,6 +128,18 @@ const mid = g.find((st) => st.period === 2 && st.clock < 900);
   assert.ok(!v.fouls.home.exact, 'still whole-game fouls at the end');
 }
 
+// A jump from tip-off straight into the second half (the page was paused over the break, or the reader
+// caught the page before it filled in): the break was not seen, so this half's fouls are unknown.
+{
+  const e = create({ now: () => 0 });
+  e.update(g.snapshot(g.find((st) => st.period === 1)), []);
+  let v = e.update(g.snapshot(mid), []);
+  assert.ok(!v.fouls.home.exact && !v.fouls.away.exact && !v.fouls.home.bonus && !v.fouls.away.bonus, 'no period fouls or bonus after a jump across the break');
+  assert.ok(!v.teamCards.home.concat(v.teamCards.away).some((c) => /Bonus|1st Half:/.test(c.big)), 'no bonus line or half summary after a jump');
+  for (let n = mid + 1; n <= mid + 20; n++) v = e.update(g.snapshot(n), g.linesAt(n));
+  assert.ok(!v.fouls.home.exact, 'still whole-game fouls later in that half');
+}
+
 // Late and close: the alert needs a clock, the last period and a one-possession margin.
 {
   const e = create({ now: () => 0 });

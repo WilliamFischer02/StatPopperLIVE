@@ -360,7 +360,8 @@ with sync_playwright() as p:
     bb.click("#newlink")
     bb.fill("#feed", "670274")
     bb.click("#feedform button[type=submit]")
-    bst.wait_for_url("**id=670274", timeout=10000)
+    # Not wait_for_url: on Playwright 1.47 (CI) it misses the load of a same-tab navigation that only changes the query.
+    bst.wait_for_function("location.search.includes('670274') && document.readyState === 'complete' && typeof rp !== 'undefined'", timeout=10000)
     bst.evaluate(BOOKMARK)
     vstart = bst.evaluate("rp.findScore(3, 13, 9)")
     for n in range(vstart - 2, vstart + 1):
