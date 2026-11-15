@@ -586,6 +586,8 @@
           if (!covered(x, pops)) pops.push(x);
         }
       }
+      // Pregame (basketball roster): nothing to pop yet, so show what the sport has for a player with no stats.
+      if (!pops.length && SP.prePops) pops = SP.prePops(p);
       pops = pops.map((x, i) => {
         const live = !!force && x.uses.includes(force);
         return { id: x.id, name: x.name, parts: x.parts, score: x.score, best: i === 0, live, dim: !live && x.score < 0.8 };
@@ -673,7 +675,8 @@
       // checked before first serve. Once the set starts this never runs: cards then come only from stats.
       if (s.status === 'pre' && chosen.length < MAX) {
         const have = new Set(chosen.map((c) => c.key));
-        for (const c of pool) {
+        const order = SP.preRank ? pool.slice().sort((a, b) => SP.preRank(b.p) - SP.preRank(a.p)) : pool;
+        for (const c of order) {
           if (chosen.length >= MAX) break;
           if (!have.has(c.key)) { chosen.push(c); have.add(c.key); }
         }

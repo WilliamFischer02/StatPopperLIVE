@@ -19,6 +19,7 @@ SITE = ROOT / "site"
 SHOTS = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "test"
 MOCK = (ROOT / "test" / "mock-statbroadcast.html").read_text(encoding="utf-8")
 MOCK_BB = (ROOT / "test" / "mock-statbroadcast-bb.html").read_text(encoding="utf-8")  # event ids starting with 7
+MOCK_BB_PRE = (ROOT / "test" / "mock-statbroadcast-bb-pregame.html").read_text(encoding="utf-8")  # event ids starting with 79
 BOARD = os.environ.get("E2E_BASE", "https://board.test").rstrip("/")
 LIVE = BOARD != "https://board.test"
 TYPES = {".html": "text/html", ".js": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json"}
@@ -49,7 +50,7 @@ def route(r):
             return r.fulfill(status=200, content_type=TYPES.get(f.suffix, "text/plain"), body=f.read_bytes())
         return r.fulfill(status=404, body="not found")
     if url.startswith("https://stats.statbroadcast.com/"):
-        return r.fulfill(status=200, content_type="text/html", body=MOCK_BB if re.search(r"[?&]id=7", url) else MOCK)
+        return r.fulfill(status=200, content_type="text/html", body=MOCK_BB_PRE if re.search(r"[?&]id=79", url) else MOCK_BB if re.search(r"[?&]id=7", url) else MOCK)
     return r.abort()
 
 
@@ -386,6 +387,47 @@ with sync_playwright() as p:
     check(bst.evaluate(f"{ovb}.querySelectorAll('.q-home .pcard').length") == 3 and bst.evaluate(f"[...{ovb}.querySelectorAll('.tab')].map(e => e.textContent).join()") == "Last play,Leaders"
           and bst.evaluate(f"[...{ovb}.querySelectorAll('#statA option')].map(o => o.value).includes('pts')"), "in-tab overlay shows the basketball board")
     ctx5.close()
+
+    # 11. Basketball pregame (the real page's layout, 2026-11-15): no box score, only rosters, then starting lineups.
+    ctx6 = b.new_context(viewport={"width": 1440, "height": 900})
+    ctx6.route("**/*", route)
+    ctx6.on("page", lambda pg: pg.on("pageerror", lambda e: errors.append(f"pregame {pg.url}: {e}")))
+    pre = ctx6.new_page()
+    pre.on("pageerror", lambda e: errors.append(f"pregame board: {e}"))
+    pre.goto(BOARD + "/")
+    pre.fill("#feed", "790001")
+    with ctx6.expect_page() as prepop:
+        pre.click("#feedform button[type=submit]")
+    pst = prepop.value
+    pst.wait_for_load_state()
+    pst.evaluate(BOOKMARK)
+    pre.wait_for_timeout(1500)
+    sr = board_state(pre)
+    print("  ", sr)
+    pdock = pst.evaluate("document.getElementById('spb-dock').shadowRoot.getElementById('dt').textContent")
+    pstat = pre.evaluate("document.querySelector('.sl-pts small').textContent")
+    check(sr["conn"].startswith("Basketball") and "14 + 15 players" in pdock and "Pregame" in pstat, f"pregame roster tables are read as basketball ({pdock}; {pstat})")
+    check(sr["home"] == ["Davis", "King", "Praytor"] and sr["away"] == ["Mousa", "Esso Essis", "Ward"], f"pregame cards are each team's top scorers, home team on the home side ({sr['home']} / {sr['away']})")
+    ppops = pre.evaluate("[...document.querySelectorAll('.q-home .pcard:first-child .pop')].map(e => e.getAttribute('data-copy'))")
+    check(ppops == ["DAVIS · Season Averages · 16.0 PPG · 5.7 RPG · 1.7 APG"], f"a pregame card shows season averages ({ppops})")
+    pre.click("#layoutseg button[data-layout='all']")
+    pre.wait_for_timeout(250)
+    names_all = pre.evaluate("[...document.querySelectorAll('.q-away .prow')].map(e => e.textContent)")
+    check(len(names_all) == 15 and any("Price Jr." in x for x in names_all) and not any("Team Averages" in x for x in names_all), f"every roster player is listed; 'Price, Jr.,Aaron' keeps its suffix ({len(names_all)})")
+    pre.click("#layoutseg button[data-layout='5']")
+    pst.evaluate("showLineups(true)")
+    pre.wait_for_timeout(1200)
+    sl = board_state(pre)
+    pdock = pst.evaluate("document.getElementById('spb-dock').shadowRoot.getElementById('dt').textContent")
+    check(sorted(sl["home"]) == ["Davis", "Holden", "King", "Miller", "Steppe"] and sorted(sl["away"]) == ["Esso Essis", "Goode", "Mousa", "Vasilic", "Ward"] and "14 + 15 players" in pdock,
+          f"once the starting lineups show, the five cards are the starters and 'Team Averages' is not a player ({sl['home']} / {sl['away']}; {pdock})")
+    # A tab title the reader does not know: teams are named from the table headings.
+    pst.evaluate("document.title = 'Cal Poly vs. Montana St. - StatBroadcast'")
+    pre.wait_for_timeout(1200)
+    su = board_state(pre)
+    check(sorted(su["home"]) == ["Davis", "Holden", "King", "Miller", "Steppe"] and "CAL POLY at MONTANA ST." in su["conn"], f"pregame still reads under an unknown tab title, teams named from the table headings ({su['conn'][:60]})")
+    pre.screenshot(path=str(SHOTS / "e2e-board-bb-pregame.png"))
+    ctx6.close()
 
     board.close()
     check(not errors, "no page errors" + ("" if not errors else ": " + " | ".join(errors[:5])))

@@ -9,6 +9,8 @@
  *     setsWon:{home:0,away:0},
  *     teams:{ home:{code,name,players:[P],totals?:P,extra?:X}, away:{...} } }
  *   P = { uni, first, last, min, fgm, fga, tpm, tpa, ftm, fta, oreb, dreb, reb, ast, stl, blk, to, pf, pts }
+ *   Pregame only (status 'pre', read from the page's lineup and roster tables): P may be
+ *   { uni, first, last, pos?, starter?, season:{gp,ppg,rpg,apg} } with no game stats.
  *   X = { paint, offTo, second, fast, bench }   (optional team extras, when the page lists them)
  *
  * Cadence: volleyball counts rallies. Basketball has no rallies, so the engine's counter advances once
@@ -36,6 +38,9 @@
     q.fgPct = q.fga > 0 ? q.fgm / q.fga : null;
     q.tpPct = q.tpa > 0 ? q.tpm / q.tpa : null;
     q.ftPct = q.fta > 0 ? q.ftm / q.fta : null;
+    // Season averages and the starter mark, only on a pregame roster (the page has no box score before tip-off).
+    if (p.season) q.season = p.season;
+    if (p.starter) q.starter = true;
     return q;
   }
 
@@ -255,7 +260,9 @@
   });
 
   const sigOf = (s) => JSON.stringify([s.status, s.period, !!s.intermission, s.score,
-    SIDES.map((side) => s.teams[side].players.map((p) => FIELDS.map((f) => num(p[f])).join(',')).join(';'))]);
+    SIDES.map((side) => s.teams[side].players.map((p) => FIELDS.map((f) => num(p[f])).join(',')).join(';')),
+    // Pregame: the roster itself is the news (the starting lineups appear a while after the rosters).
+    s.status === 'pre' ? SIDES.map((side) => s.teams[side].players.map((p) => p.uni + (p.starter ? '*' : '')).join(',')) : 0]);
 
   const teamFouls = (s, side) => {
     const t = s.teams[side];
@@ -597,6 +604,11 @@
     pinWorthy: (p, N, pin) => (N[pin.stat] > 0) || (['tpm', 'stl', 'blk'].includes(pin.stat) && p[pin.stat] >= 2),
     pinWhen: (d) => (d === 0 ? 'Just now · ' : 'Moments ago · '),
     passText: 'Skip this player for the next few minutes',
+    // Pregame: a card with no game stats shows the player's season averages, and a side's cards are its
+    // starters (once the page lists them), then its top scorers.
+    prePops: (p) => (p.season && p.season.gp > 0 ? [{ id: 'season', name: 'Season Averages', uses: [], score: 0,
+      parts: [{ v: num(p.season.ppg).toFixed(1), l: 'PPG' }, { v: num(p.season.rpg).toFixed(1), l: 'RPG' }, { v: num(p.season.apg).toFixed(1), l: 'APG' }] }] : []),
+    preRank: (p) => (p.starter ? 1000 : 0) + (p.season ? num(p.season.ppg) : 0),
     unit: ['play', 'plays'],
   };
   root.PopBasketball = api;
