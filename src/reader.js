@@ -4,8 +4,10 @@
  * shows, then hands it to the Stat Pop Board window on this computer through
  * window.postMessage. It makes no network requests of its own.
  *
- *   - score, set and team codes from the tab title ("UI 18, MSU 24 - SET 3")
- *   - player and team rows from tables whose headers look like a volleyball box
+ *   - score, set (or period and clock) and team codes from the tab title
+ *     ("UI 18, MSU 24 - SET 3", "UM 31, MSU 38 - 2nd 12:34")
+ *   - player and team rows from tables whose headers look like a volleyball or a basketball box;
+ *     which of the two it finds decides the sport
  *   - new play-by-play / console sentences that name a rostered player
  */
 function startReader(SPB) {
@@ -13,7 +15,7 @@ function startReader(SPB) {
   const VERSION = SPB.version;
   const INSTANCE = Math.random().toString(36).slice(2, 10);
   const BOARD_ORIGIN = SPB.origin;
-  const eventId = new URLSearchParams(location.search).get('id') || (/practice/.test(location.pathname) ? 'practice' : 'page');
+  const eventId = new URLSearchParams(location.search).get('id') || (/practice-bb/.test(location.pathname) ? 'practice-bb' : /practice/.test(location.pathname) ? 'practice' : 'page');
   const store = {
     get(k, d) { try { const v = localStorage.getItem('spb:' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem('spb:' + k, JSON.stringify(v)); } catch (e) { /* settings just won't persist */ } },
@@ -45,6 +47,28 @@ function startReader(SPB) {
     };
   }
 
+  // Basketball: the part of the title after the dash ("2nd 12:34", "1st Half", "Q3 4:10", "Halftime",
+  // "End of 1st", "OT 2:05", "Final/OT"). The real wording has not been seen yet (first basketball game:
+  // 2026-11-15), so every piece is optional and the engine copes with whatever is missing.
+  // period: 1.. in regulation; ot: overtime number; periods: 2 or 4 when the wording says, else 0.
+  function parseBBStatus(raw) {
+    const t = String(raw || '');
+    const cm = t.match(/(\d{1,2}:\d{2}(?:\.\d)?)/) || t.match(/(?:^|\s)(:?\d{1,2}\.\d)(?=\s|$)/);
+    const out = { clock: cm ? cm[1] : null, final: /final/i.test(t), period: 0, ot: 0, periods: 0, intermission: /\bend\b|half\s*-?\s*time|intermission|\bbreak\b/i.test(t), halftime: false };
+    const noClock = cm ? t.replace(cm[1], ' ') : t;
+    const q = noClock.match(/\bQ(?:TR|UARTER)?\.?\s*([1-4])\b/i) || noClock.match(/\b([1-4])(?:st|nd|rd|th)\s+(?:q|qtr|quarter)/i);
+    const half = noClock.match(/\b(1st|2nd|first|second)\s+half\b/i) || noClock.match(/\bH(?:ALF)?\s*([12])\b/i);
+    const ot = noClock.match(/\b(\d)?\s*OT\s*(\d)?\b/i) || noClock.match(/overtime/i);
+    const ord = noClock.match(/\b([1-4])(?:st|nd|rd|th)\b/i) || noClock.match(/\b(?:period|per|prd)\.?\s*([1-4])\b/i);
+    if (q) { out.period = +q[1]; out.periods = 4; }
+    else if (half) { out.period = /^(1|1st|first)$/i.test(half[1]) ? 1 : 2; out.periods = 2; }
+    else if (ot && !out.final) out.ot = +(ot[1] || ot[2] || 1);
+    else if (ord) { out.period = +ord[1]; if (out.period > 2) out.periods = 4; }
+    else if (/half\s*-?\s*time|^\s*half\s*$/i.test(noClock)) { out.halftime = true; out.intermission = true; }
+    if (out.final && /OT/i.test(t)) out.ot = +((t.match(/(\d)\s*OT/i) || [])[1] || 1);
+    return out;
+  }
+
   // Column abbreviations. The live StatBroadcast volleyball box (first seen 2026-10-17,
   // SUU at MSU, event 670274) uses S # PLAYER K E TA HIT% AS SA DG BL -- so AS, DG and BL
   // are the real page's spellings for assists, digs and blocks. Without them looksVolleyball
@@ -67,12 +91,12 @@ function startReader(SPB) {
     for (const c of tr.cells) { const span = Math.max(1, +c.colSpan || 1); for (let i = 0; i < span; i++) out.push(c); }
     return out;
   }
-  function headerMap(table) {
+  function headerMap(table, keyOf) {
     let best = null;
     for (const tr of [...table.rows].slice(0, 4)) {
       const map = {}; let hits = 0;
       expandRow(tr).forEach((c, i) => {
-        const key = HMAP[cellText(c).toUpperCase()];
+        const key = keyOf(cellText(c).toUpperCase());
         if (!key) return;
         if (key === 'e' && map.e != null) { map.setE = i; return; }
         if (map[key] == null) { map[key] = i; hits++; }
@@ -85,10 +109,79 @@ function startReader(SPB) {
     const extra = ['sa', 'dig', 'bs', 'ba', 'a', 're'].filter((k) => map[k] != null).length;
     return map.k != null && (map.ta != null || map.pct != null) && extra >= 2;
   }
-  const looksBasketball = (table) => /\bREB\b|\bFG\b|\b3PT\b|\bFGM\b/.test(cellText(table.rows[0] || table).toUpperCase());
   // Summary rows that sit in or beside a box score: team, totals, and team-by-set rows ("Set 1", "Match").
   // Seen as player cards on the live page on 2026-10-17, so they are rejected by label as well as by table.
-  const NON_PLAYER = /^(sets?|game|match|totals?|team|tm|opp(onent)?s?)\b|^\d+(st|nd|rd|th)?(\s+sets?)?$/i;
+  const NON_PLAYER = /^(sets?|game|match|totals?|team|tm|opp(onent)?s?|bench|starters|reserves|technical|coach|dnp|did not play|1st half|2nd half|half|quarter|period|ot)\b|^\d+(st|nd|rd|th)?(\s+(sets?|half|quarter|qtr|period))?$/i;
+
+  // Basketball box columns. Written for both the StatCrew box (## Player FG-FGA 3FG-FGA FT-FTA OFF DEF TOT
+  // PF TP A TO BLK S MIN) and the shorter live layout (# PLAYER MIN FG 3PT FT ORB-DRB REB PF A TO BLK STL PTS).
+  // fg, tp, ft and od are "made-attempted" (or off-def) cells such as "5-11".
+  function bbKey(h) {
+    h = h.replace(/\s+/g, '').replace(/\.$/, '');
+    if (/^(#|##|NO|NUM)$/.test(h)) return 'uni';
+    if (/^(PLAYERS?|NAME|ATHLETE)$/.test(h)) return 'name';
+    if (/^(MIN|MINS|MP)$/.test(h)) return 'min';
+    if (/%|PCT/.test(h)) return null;
+    if (h === 'FGM') return 'fgm';
+    if (h === 'FGA') return 'fga';
+    if (/^(3PM|3FGM|3PTM)$/.test(h)) return 'tpm';
+    if (/^(3PA|3FGA|3PTA)$/.test(h)) return 'tpa';
+    if (h === 'FTM') return 'ftm';
+    if (h === 'FTA') return 'fta';
+    if (/^FG(M?[-\/](FG)?A)?$/.test(h)) return 'fg';
+    if (/^3-?(PT|FG|P)?(FG)?(M?[-\/](3P|3PT|FG)?A)?$/.test(h) || h === '3PTFG') return 'tp';
+    if (/^FT(M?[-\/](FT)?A)?$/.test(h)) return 'ft';
+    if (/^(OREB|OFF|OR|ORB)$/.test(h)) return 'oreb';
+    if (/^(DREB|DEF|DR|DRB)$/.test(h)) return 'dreb';
+    if (/^(REB|REBS|TOT|TR|TRB|RB)$/.test(h)) return 'reb';
+    if (/^(ORB|OR|OREB|OFF|O)[-\/](DRB|DR|DREB|DEF|D)$/.test(h)) return 'od';
+    if (/^(A|AST|AS|ASST)$/.test(h)) return 'ast';
+    if (/^(TO|TOV|TOS)$/.test(h)) return 'to';
+    if (/^(BLK|BLKS|BK|BL|BS)$/.test(h)) return 'blk';
+    if (/^(STL|STLS|ST)$/.test(h)) return 'stl';
+    if (/^(PF|F|FLS|FOULS)$/.test(h)) return 'pf';
+    if (/^(PTS|TP|POINTS)$/.test(h)) return 'pts';
+    if (/^(S|GS)$/.test(h)) return 'sflag';
+    return null;
+  }
+  // Each sport: how to read a header cell, whether a header row is that sport's player box, and how to
+  // turn a row's cells into a stat line.
+  const READ = {
+    vb: {
+      keyOf: (h) => HMAP[h],
+      looks: looksVolleyball,
+      stats(cells, map) {
+        const val = (k) => (map[k] == null || !cells[map[k]] ? 0 : parseFloat(cellText(cells[map[k]]).replace(/[^\d.-]/g, '')) || 0);
+        const stats = {};
+        for (const k of ['k', 'e', 'ta', 'a', 'sa', 'se', 're', 'dig', 'bs', 'ba', 'be']) stats[k] = val(k);
+        return stats;
+      },
+    },
+    bb: {
+      keyOf: bbKey,
+      looks: (map) => map.pts != null && (map.fg != null || map.fgm != null) && (map.reb != null || map.oreb != null || map.od != null || map.ast != null),
+      // Only the columns the table has are returned, so a short on-court table merged over the full box
+      // cannot zero a stat it does not list.
+      stats(cells, map) {
+        const txt = (k) => (map[k] == null || !cells[map[k]] ? '' : cellText(cells[map[k]]));
+        const n = (k) => parseFloat(txt(k).replace(/[^\d.]/g, '')) || 0;
+        const pair = (k) => { const m = txt(k).match(/(\d+)\s*[-\/]\s*(\d+)/); return m ? [+m[1], +m[2]] : null; };
+        const o = {};
+        for (const [k, m, a] of [['fg', 'fgm', 'fga'], ['tp', 'tpm', 'tpa'], ['ft', 'ftm', 'fta'], ['od', 'oreb', 'dreb']]) {
+          const pr = pair(k);
+          if (pr) { o[m] = pr[0]; o[a] = pr[1]; }
+          else if (map[k] != null && map[m] == null) o[m] = n(k);
+          if (map[m] != null) o[m] = n(m);
+          if (map[a] != null) o[a] = n(a);
+        }
+        for (const k of ['reb', 'ast', 'to', 'blk', 'stl', 'pf', 'pts']) if (map[k] != null) o[k] = n(k);
+        if (map.stl == null && map.sflag != null && /^\d+$/.test(txt('sflag'))) o.stl = +txt('sflag');
+        if (map.reb == null && (o.oreb != null || o.dreb != null)) o.reb = (o.oreb || 0) + (o.dreb || 0);
+        if (map.min != null) o.min = parseInt(txt('min'), 10) || 0;
+        return o;
+      },
+    },
+  };
 
   function splitName(raw) {
     let s = raw.replace(/\*/g, '').replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim().replace(/^\d+\s+/, '');
@@ -123,17 +216,18 @@ function startReader(SPB) {
   }
 
   const ignoredTables = [];
-  function readTables(title, names) {
+  function readTables(title, names, sport) {
+    const R = READ[sport];
     const found = [];
     ignoredTables.length = 0;
     for (const table of document.querySelectorAll('table')) {
       if (ours(table)) continue;
-      const hm = headerMap(table);
-      if (!hm || !looksVolleyball(hm.map)) continue;
+      const hm = headerMap(table, R.keyOf);
+      if (!hm || !R.looks(hm.map)) continue;
       const bits = contextBits(table);
       if (/season|career|cumulative/i.test(bits.slice(0, 2).join(' '))) continue;
-      // A player box has a jersey or a name column. Team-by-set and comparison tables have volleyball
-      // columns but neither, and their rows ("Set 1", "Match") would otherwise read as players.
+      // A player box has a jersey or a name column. Team-by-set, by-period and comparison tables have the
+      // stat columns but neither, and their rows ("Set 1", "Match", "1st Half") would otherwise read as players.
       if (hm.map.uni == null && hm.map.name == null) {
         if (ignoredTables.length < 4) ignoredTables.push({ headers: Object.keys(hm.map).join(' '), rows: table.rows.length, context: bits.join(' | ').slice(0, 100) });
         continue;
@@ -143,10 +237,8 @@ function startReader(SPB) {
       const rows = [...table.rows];
       for (const tr of rows.slice(rows.indexOf(hm.tr) + 1)) {
         const cells = expandRow(tr);
-        const val = (k) => (hm.map[k] == null || !cells[hm.map[k]] ? 0 : parseFloat(cellText(cells[hm.map[k]]).replace(/[^\d.-]/g, '')) || 0);
         const lead = cells.slice(0, 3).map(cellText).join(' ');
-        const stats = {};
-        for (const k of ['k', 'e', 'ta', 'a', 'sa', 'se', 're', 'dig', 'bs', 'ba', 'be']) stats[k] = val(k);
+        const stats = R.stats(cells, hm.map);
         if (/^\s*(team\s+)?totals?\b/i.test(lead) || /\btotals?\b/i.test(cells.slice(0, 2).map(cellText).join(' '))) { totals = stats; continue; }
         if (/^\s*(tm|team)\b/i.test(lead)) continue;
         const nameCell = hm.map.name != null ? cells[hm.map.name] : cells.find((x) => /[A-Za-z]{2}/.test(cellText(x)));
@@ -209,8 +301,8 @@ function startReader(SPB) {
 
   // ---------------------------------------------------------- play lines
 
-  const ACTION = /\b(kill|ace|block|dig|attack error|service error|serve|assist|point|wins|timeout|time-out|challenge|review|substitution|subs?:|card|penalty)\b/i;
-  const ALERT = /\b(time[- ]?out|challenge|video review|red card|yellow card|penalty|sanction)\b/i;
+  const ACTION = /\b(kill|ace|block|dig|attack error|service error|serve|assist|point|wins|timeout|time-out|challenge|review|substitution|subs?:|card|penalty|good!?|made|makes|miss(ed|es)?|rebound|steal|turnover|turnovr|foul|dunk|lay-?up|jumper|jump shot|3[- ]?pt(r|\.)?|three|free throw|ft shot)\b/i;
+  const ALERT = /\b(time[- ]?out|challenge|video review|red card|yellow card|penalty|sanction|technical|flagrant)\b/i;
   const seen = new Set();
   const statTables = new WeakSet();
   const lineLog = [];
@@ -263,38 +355,110 @@ function startReader(SPB) {
 
   let trackedSets = { vis: 0, home: 0 }, lastTitle = null;
   const diag = { version: VERSION, eventId, notes: [] };
+  // Basketball: 2 halves or 4 quarters, remembered once the page gives it away.
+  let bbPeriods = 0;
+
+  // A line score: a small table whose header counts periods (1 2, or 1 2 3 4) above one row per team.
+  // Returns how many periods it lists, or 0.
+  function lineScorePeriods(title) {
+    for (const table of document.querySelectorAll('table')) {
+      if (ours(table) || statTables.has(table) || table.rows.length < 3 || table.rows.length > 4) continue;
+      const head = expandRow(table.rows[0]).map(cellText);
+      const nums = head.filter((h) => /^[1-4]$/.test(h));
+      if (nums.length < 2 || head.includes('5') || nums.join('') !== '1234'.slice(0, nums.length)) continue;
+      const body = [...table.rows].slice(1, 3).map((tr) => cellText(expandRow(tr)[0] || tr));
+      const is = (code, text) => !!code && mentions(text, code);
+      if (body.length === 2 && (is(title.home.code, body[0]) || is(title.home.code, body[1])) && (is(title.vis.code, body[0]) || is(title.vis.code, body[1]))) return nums.length;
+    }
+    return 0;
+  }
+
+  // What every table on the page is headed, for Reader check's Copy for Claude: it is how the reader gets
+  // fitted to a layout it has not met. Refreshed every few seconds, not on every change.
+  let pageTables = [], pageTablesAt = 0;
+  function describeTables() {
+    if (Date.now() - pageTablesAt < 5000) return pageTables;
+    pageTablesAt = Date.now();
+    pageTables = [];
+    for (const table of document.querySelectorAll('table')) {
+      if (ours(table) || !table.rows.length) continue;
+      if (pageTables.length >= 14) break;
+      pageTables.push({ head: expandRow(table.rows[0]).map(cellText).join(' | ').slice(0, 140),
+        row2: table.rows[1] ? expandRow(table.rows[1]).map(cellText).join(' | ').slice(0, 140) : '', rows: table.rows.length, id: table.id || '', cls: String(table.className || '').slice(0, 40) });
+    }
+    return pageTables;
+  }
 
   function snapshotFromPage() {
-    const title = parseTitle(document.title);
+    let title = parseTitle(document.title);
     const names = teamNames();
-    const tables = readTables(title, names);
+    const bothSides = (ts) => ts.some((t) => t.side === 'vis') && ts.some((t) => t.side === 'home');
+    // The sport is whichever box score the page shows: volleyball columns or basketball columns.
+    let sport = 'vb';
+    let tables = readTables(title, names, 'vb');
+    if (!tables.length) {
+      const bbt = readTables(title, names, 'bb');
+      if (bbt.length) { tables = bbt; sport = 'bb'; }
+    }
     tables.forEach((t) => statTables.add(t.table));
     diag.title = document.title;
     diag.parsedTitle = title;
     diag.paused = titlePaused(document.title);
     diag.names = names;
+    diag.sport = tables.length ? sport : null;
     diag.tables = tables.map((t) => ({ side: t.side, players: t.players.length, totals: !!t.totals, headers: t.headers.join(' '), skipped: t.skipped, context: t.ctx }));
     diag.ignoredTables = ignoredTables.slice();
+    diag.pageTables = describeTables();
+    // Basketball safety net: if the tab title is not in the form this reader knows, take the score from
+    // the box score itself (each team's points) and the names from the page heading. The period and clock
+    // are then unknown, and the engine estimates how far along the game is from the score.
+    if (!title && sport === 'bb' && bothSides(tables)) {
+      const pts = (side) => {
+        const ts = tables.filter((t) => t.side === side);
+        const tot = ts.map((t) => t.totals && t.totals.pts).find((v) => v != null);
+        return tot != null ? tot : Math.max(0, ...ts.map((t) => t.players.reduce((a, p) => a + (p.pts || 0), 0)));
+      };
+      const code = (name, d) => (name ? String(name).trim().slice(0, 12) : d);
+      title = { vis: { code: code(names.vis, 'AWAY'), score: pts('vis') }, home: { code: code(names.home, 'HOME'), score: pts('home') },
+        final: false, set: null, raw: '', paused: false, fromBox: true };
+      diag.parsedTitle = title;
+    }
     if (!title) return { error: 'Waiting for the score in the tab title (accept the terms on the stats page if you haven’t).' };
-    if (!tables.some((t) => t.side === 'vis') || !tables.some((t) => t.side === 'home')) {
-      const bb = [...document.querySelectorAll('table')].some(looksBasketball);
-      return { error: bb ? 'This looks like a basketball page. Basketball support comes next.'
-        : 'Waiting for both teams’ box-score tables. Switch the stats page to its box score view.' };
+    if (!bothSides(tables)) {
+      return { error: 'Waiting for both teams’ box-score tables. Switch the stats page to its box score view.' };
+    }
+    const mergeSide = (side) => {
+      const map = new Map(); let totals = null;
+      for (const t of tables.filter((x) => x.side === side)) {
+        for (const p of t.players) map.set(p.uni, { ...(map.get(p.uni) || {}), ...p });
+        if (t.totals) totals = { ...(totals || {}), ...t.totals };
+      }
+      return { code: title[side].code, name: (side === 'home' ? names.home : names.vis) || title[side].code, players: [...map.values()], totals };
+    };
+    rosterWords = tables.flatMap((t) => t.players.map((p) => p.last.toLowerCase())).filter((w) => w.length > 2);
+    if (sport === 'bb') {
+      const st = parseBBStatus(title.raw);
+      if (st.periods) bbPeriods = st.periods;
+      else if (!bbPeriods) { const n = lineScorePeriods(title); bbPeriods = n === 2 || n === 4 ? n : 0; }
+      const P = bbPeriods || 2;
+      let period = st.ot ? P + st.ot : st.period;
+      if (st.halftime) period = P / 2;
+      const teams = { home: mergeSide('home'), away: mergeSide('vis') };
+      const any = [teams.home, teams.away].some((t) => t.players.some((p) => (p.pts || 0) + (p.fga || 0) + (p.reb || 0) + (p.pf || 0) + (p.min || 0) > 0));
+      const pre = !st.final && title.home.score + title.vis.score === 0 && !any;
+      diag.status = { ...st, periods: bbPeriods };
+      return {
+        sport: 'bb', status: st.final ? 'final' : pre ? 'pre' : 'live', period: period || 0, periods: bbPeriods, clock: st.clock,
+        intermission: !st.final && st.intermission, rawStatus: title.raw, set: period || 0,
+        score: { home: title.home.score, away: title.vis.score }, setsWon: { home: 0, away: 0 }, teams,
+      };
     }
     if (lastTitle && title.set && lastTitle.set && title.set > lastTitle.set) {
       trackedSets[lastTitle.home.score > lastTitle.vis.score ? 'home' : 'vis'] += 1;
     }
     lastTitle = title;
     const sw = readSetsWon(title) || trackedSets;
-    const merge = (side) => {
-      const map = new Map(); let totals = null;
-      for (const t of tables.filter((x) => x.side === side)) {
-        for (const p of t.players) map.set(p.uni, { ...(map.get(p.uni) || {}), ...p });
-        if (t.totals) totals = t.totals;
-      }
-      return { code: title[side].code, name: (side === 'home' ? names.home : names.vis) || title[side].code, players: [...map.values()], totals };
-    };
-    rosterWords = tables.flatMap((t) => t.players.map((p) => p.last.toLowerCase())).filter((w) => w.length > 2);
+    const merge = mergeSide;
     return {
       sport: 'vb', status: title.final ? 'final' : (title.set || 0) === 0 ? 'pre' : 'live', set: title.set || 1,
       score: { home: title.home.score, away: title.vis.score },
@@ -378,9 +542,10 @@ function startReader(SPB) {
     applyLayout();
   }
   // The overlay's own copy of the board settings (this tab's storage, so they are separate from the board window's).
-  let ctl = null, lastRotateAt = Date.now();
+  let ctl = null, lastRotateAt = Date.now(), lastClock;
   function applyLayout() {
     if (!ctl) return;
+    if (state.raw) ctl.setSport(state.raw.sport);
     eng.setCards(ctl.settings.layout === '5' ? 5 : 3);
     board.setLayout(ctl.settings.layout === 'all' ? 'list' : 'cards', ctl.settings.listStats);
   }
@@ -472,7 +637,8 @@ function startReader(SPB) {
   }
   function diagSummary() {
     return { version: VERSION, eventId, url: location.href.split('#')[0], title: diag.title, parsedTitle: diag.parsedTitle,
-      names: diag.names, tables: diag.tables, ignoredTables: diag.ignoredTables, error: state.error, linesCaptured: lineSeq, paused: !!diag.paused };
+      names: diag.names, sport: diag.sport, status: diag.status, tables: diag.tables, ignoredTables: diag.ignoredTables, pageTables: diag.pageTables,
+      error: state.error, linesCaptured: lineSeq, paused: !!diag.paused };
   }
   function send(force) {
     const t = target();
@@ -515,15 +681,21 @@ function startReader(SPB) {
       if (!autoOpened) { autoOpened = true; if (store.get('mode') === 'here') setOpen(true); }
       const fresh = lineLog.filter((l) => l.id > engLineId);
       engLineId = lineSeq;
-      const hash = JSON.stringify([snap.set, snap.score, snap.setsWon, snap.teams.home.players, snap.teams.away.players]);
+      const hash = JSON.stringify([snap.sport, snap.status, snap.set, snap.intermission, snap.score, snap.setsWon, snap.teams.home.players, snap.teams.away.players]);
       if (force || hash !== lastHash || fresh.length) {
         lastHash = hash; lastChange = Date.now();
-        inTabView = eng.update(PE.swapSides(snap, swapped), fresh.map((l) => l.text).slice(-3));
+        if (ctl && ctl.setSport(snap.sport)) applyLayout();
+        inTabView = eng.update(PE.swapSides(snap, swapped), fresh.map((l) => l.text).slice(snap.sport === 'bb' ? -6 : -3));
         if (overlayOpen()) { applyColors(); board.render(inTabView); }
+      } else if (snap.clock !== lastClock) {
+        // Only the game clock moved: refresh the game panel, leave the cards alone.
+        inTabView = eng.update(PE.swapSides(snap, swapped), []);
+        if (overlayOpen()) board.renderGame(inTabView);
       } else if (eng.expireHolds()) {
         inTabView = eng.view();
         if (overlayOpen()) board.render(inTabView);
       }
+      lastClock = snap.clock;
       if (overlayOpen()) {
         const age = Math.round((Date.now() - lastChange) / 1000);
         shadow.getElementById('status').textContent = (diag.paused ? 'StatBroadcast paused · click its page to resume' : 'Reading this page') + ` · last change ${age}s ago`;

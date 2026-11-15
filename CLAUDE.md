@@ -6,9 +6,9 @@ Read this file and `docs/HANDOFF.md` before changing anything. `docs/CONTEXT.md`
 
 A personal second-monitor tool for William, who runs the graphics computer for Montana PBS broadcasts of Montana State (MSU) volleyball, basketball and football. During a match he watches the public StatBroadcast stats page and types short stat "pops" into the graphics system by hand. This site surfaces the few stats worth popping right now, pre-formatted the way he types them.
 
-- **Live:** https://stat-pop-board.vercel.app (`/` board, `/setup` reader setup, `/practice` stand-in stats page, `/replay` demo)
+- **Live:** https://stat-pop-board.vercel.app (`/` board, `/setup` reader setup, `/practice` volleyball stand-in stats page, `/practice-bb` basketball stand-in, `/replay` demo)
 - **Personal and non-commercial.** It is not connected to the graphics software, and the network never sees the data. It runs on one computer, with the stats tab and the board window side by side.
-- **Sport support:** volleyball only, for now. The reader recognizes a basketball page and says it isn't supported yet.
+- **Sport support:** volleyball and basketball (v0.5.0). The reader tells them apart from the box score's columns; nothing is chosen by hand. Basketball has **not yet run on a real StatBroadcast page** (first game: Nov 15, 2026); see "Basketball" below and `docs/HANDOFF.md`. Football is not built.
 
 ## Hard rules
 
@@ -25,12 +25,13 @@ A personal second-monitor tool for William, who runs the graphics computer for M
 python3 tools/build_site.py            # rebuild site/ and vercel.json
 python3 tools/build_site.py --check    # exit 1 if site/ is stale (CI runs this)
 node test/replay.test.js               # engine replay of the Oct 1 match: prints the cards and asserts the board rules (fill, Pin)
-python3 test/e2e_site.py [shots_dir]   # Playwright end-to-end test against the local build (26 checks)
+node test/basketball.test.js           # engine through the made-up basketball game (halves and quarters) with the basketball rules asserted
+python3 test/e2e_site.py [shots_dir]   # Playwright end-to-end test against the local build (54 checks)
 E2E_BASE=https://stat-pop-board.vercel.app python3 test/e2e_site.py   # same checks against the live site
 python3 tools/build_replay.py          # only if data/msu-idaho-2026-10-01.txt changes: rebuilds replay JSON and replay-src.json
 ```
 
-The e2e test needs Playwright for Python: `pip install playwright && python -m playwright install chromium`. StatBroadcast is always replaced by `test/mock-statbroadcast.html`, so the tests never contact it. Regenerate the mock with `python3 test/make_mock.py` if `src/replay.js` or the replay data changes.
+The e2e test needs Playwright for Python: `pip install playwright && python -m playwright install chromium`. StatBroadcast is always replaced by `test/mock-statbroadcast.html` (volleyball) or `test/mock-statbroadcast-bb.html` (basketball; any event id starting with 7), so the tests never contact it. Regenerate both mocks with `python3 test/make_mock.py` if `src/replay.js`, `src/bb-sim.js` or the replay data changes.
 
 **On William's Windows machine** the commands are `python`, not `python3`, and Python 3.14 needs a current Playwright (`pip install --upgrade playwright`; the 1.47 pin in CI has no 3.14 wheel). Set `PYTHONIOENCODING=utf-8` for the e2e test's output. `.gitattributes` forces LF and the build writes LF, so `--check` passes on Windows too.
 
@@ -87,7 +88,9 @@ The board pings `hello` every 3 s whenever it hasn't had state for 6 s. That pin
 P = { uni, first, last, k, e, ta, a, sa, se, re, dig, bs, ba, be }
 ```
 
-**Engine (`src/engine.js`).**
+**Sports.** `snapshot.sport` is `'vb'` or `'bb'`. The engine keeps one set of board rules (card selection, stability, Pin, Pass, Hide, stars, rotate, layouts, team-card line picking) and asks a sport object for everything else: `VB` inside `engine.js`, and `src/basketball.js` (`PopBasketball`) for basketball. A change of sport resets the engine. Volleyball's behaviour must not change when basketball is edited: `node test/replay.test.js` output is the regression check (it was byte-identical before and after the v0.5.0 refactor).
+
+**Engine (`src/engine.js`).** The bullets below describe volleyball; basketball's equivalents follow under "Basketball".
 
 - **Notability.** Each stat is scored against a par that scales with effective sets played (`vbEffSets`). So 5 kills is notable in set 1 and ordinary by set 4. A sub-par stat like "1 block" can still appear, but only greyed, as filler (see Board makeup).
 - **Pops.** Each pop is the button label William uses: Attacks, Kills, Blocks, Digs, Assists, Aces, Points, plus the combos Attacks & Blocks, Attacks & Digs, Digs & Blocks and Assists & Digs. A player card shows up to 3 pops and at least 2 when the player has 2 different stats. Options below pop level (score < 0.8) are flagged `dim` and shown greyed.
@@ -106,7 +109,25 @@ P = { uni, first, last, k, e, ta, a, sa, se, re, dig, bs, ba, be }
 - **Alerts.** Set point, match point, timeout, challenge, penalty, sub, set won and final.
 - **Rotation.** A tracker built from the serve order.
 
+**Basketball (`src/basketball.js`, v0.5.0).**
+
+- **Snapshot.** `{ sport:'bb', status, period (0 = unknown), periods (2, 4 or 0), clock ('12:34' or null), intermission, rawStatus, score, teams }` with `P = { uni, first, last, min, fgm, fga, tpm, tpa, ftm, fta, oreb, dreb, reb, ast, stl, blk, to, pf, pts }`. The full contract is at the top of the file.
+- **Cadence.** There are no rallies. The engine's counter (`mem.rally`) advances once per update in which the score or any stat changed (a "play"). Windows are longer to match: Pass 25 plays, new-card protection 8, "just now" 2, recent involvement 30. A clock-only update is not a play: `update()` returns the cached cards with a fresh header, so the clock can tick every second without a card moving. The board and the overlay redraw only the game panel then (`board.renderGame`), so click-to-copy is never interrupted.
+- **Game time.** `elapsed(s)` uses the period and clock when the page gives them; otherwise it estimates from the combined score (about 3.6 points a minute). Notability scales with 10-minute blocks played (`eff`, minimum 0.8).
+- **Pops.** Points, Shooting, 3-Pointers, Free Throws, Rebounds, Assists, Steals, Blocks, Fouls, and the combos Points & Rebounds, Points & Assists, Points, Reb & Ast, Rebounds & Blocks, Steals & Blocks. **These names are a first guess; William has not yet confirmed his graphics software's basketball buttons.** Change `name` in `POPS`.
+- **Live cards.** Two sources. The box score itself: whoever's line just changed (a three, a basket, a block, a steal, an assist, a rebound) gets the "Just now" pin, so the board reacts even if the page's play-by-play wording is not recognised. And the play lines (`parsePlay`: StatCrew wording and sentence wording), which override with a better label (Dunk, Layup). A pin only takes a card when the stat behind it is worth reading (`pinWorthy`).
+- **Hot hand.** A player who has scored 7 or more of his team's points in a row gets the streak tag ("9 straight MSU points"), the basketball stand-in for a serving streak.
+- **Fouls.** Foul trouble is a pop (Fouls), a badge and a short alert: 5 is out, 4 any time, 3 before halftime, 2 in the first quarter of the game. Team fouls show beside each team code, counted for this half or quarter, with the bonus at 7 and double bonus at 10 (halves) or 5 (quarters). If the reader started partway through the period the count cannot be known: the box then shows whole-game fouls labelled `pf` and no bonus is claimed.
+- **Team card.** Runs in points ("8-0 Scoring Run" from 6-0, "14-3 Run"), with "over 3:12" when there is a clock; field-goal drought (clock needed); In the Bonus; Team FG%, Team 3PT, rebounds, turnovers forced, assists, blocks, steals, Team FT; a period summary after each half or quarter. The same greyed filler rule tops the card up to 3 lines. `teams[side].extra` (points in the paint, off turnovers, bench, fast break, second chance) is supported by the engine but **no reader fills it yet**.
+- **Alerts.** Final, halftime and end of period, one-possession game or tie in the last two minutes (clock needed), foul trouble and fouled out, bonus, lead change and tie (after five minutes), timeout, technical, review, substitution.
+- **Game panel.** Period and clock under the score, the margin and any run on the line below, and a Leaders tab (points, rebounds, assists per team) where volleyball has Rotation.
+- **Stars and list stats** are kept per sport: basketball stars under `spb:stars:<TEAMKEY>:BB`, the list layout's two stats under `spb:liststats:bb` (default Points & Rebounds). The bundled MSU roster is volleyball's and is only merged on a volleyball page.
+
 **Reader (`src/reader.js`).**
+
+- **Sport detection (v0.5.0).** `readTables(title, names, sport)` runs with volleyball's header map first, then basketball's (`READ.vb`, `READ.bb`); whichever finds player boxes sets `snapshot.sport`. A basketball box needs a points column, a field-goal column and rebounds or assists. `bbKey` maps both the StatCrew headers (`## Player FG-FGA 3FG-FGA FT-FTA OFF DEF TOT PF TP A TO BLK S MIN`) and a shorter live layout (`# PLAYER MIN FG 3PT FT ORB-DRB REB PF A TO BLK STL PTS`); "5-11" cells are split into made and attempted. **Both layouts are guesses.**
+- **Basketball title.** `parseBBStatus` reads whatever follows the dash: a clock, `1st`/`2nd`, `1st Half`, `Q3`, `Halftime`, `End of 1st`, `OT`, `Final`. Halves or quarters comes from that wording or from a line score with 2 or 4 period columns. If the title does not parse at all on a basketball page, the score is taken from the box score's points and the names from the page heading (`title.fromBox`).
+- **`diag.pageTables`.** The first two rows of up to 14 tables on the page, refreshed every 5 s. It is in Copy for Claude and is how the reader gets fitted to a layout it has not met.
 
 - **Paused.** StatBroadcast prefixes the tab title with `[Paused]` when it stops refreshing the page (seen 2026-10-17). The reader strips any leading `[tag]` before parsing (otherwise it lands in the visitor's team code and rekeys stars and colours) and reports `diag.paused`; the board shows mode **Paused** with a notice, and the dock and overlay say so. The reader never pokes the page to resume it.
 - **Tables.** The table's headers are mapped (K, E, TA, PCT, A, SA, SE, RE, DIG, BS, BA, BE…, plus the live page's HIT%, AS, DG, BL), and a table counts as volleyball only if it has K plus TA or PCT plus at least 2 more columns.
@@ -122,15 +143,18 @@ P = { uni, first, last, k, e, ta, a, sa, se, re, dig, bs, ba, be }
 | `src/engine.js` | PopEngine: scoring, cards, alerts, rotation. DOM-free. Ends with the exact trailer `})(typeof globalThis !== 'undefined' ? globalThis : this);`, which the build swaps for `})(SPB);` and asserts on. |
 | `src/view.js` | BoardView: renders an engine view into a page or a shadow root. Same trailer rule. |
 | `src/picker.js` | ImpactPicker: star store (`localStorage`), roster merge, picker panel. Same trailer rule. |
-| `src/reader.js` | `startReader(SPB)`: page reading, dock, in-tab overlay, postMessage bridge. |
+| `src/basketball.js` | PopBasketball: basketball's stat line, notability, pops, runs, fouls, alerts, play parsing. DOM-free, same trailer rule; bundled before `engine.js`. |
+| `src/bb-sim.js` | BBSim: a made-up, seeded basketball game (invented players) for `/practice-bb`, the basketball mock and the tests. Not real data. |
+| `src/reader.js` | `startReader(SPB)`: page reading (volleyball and basketball), dock, in-tab overlay, postMessage bridge. |
 | `src/app-live.js` | Board page (`/`): link input, linking, status modes (Waiting, Linked, Live, Stale), Reader check with "Copy for Claude". |
 | `src/app-practice.js`, `src/replay.js`, `src/replay-parse.js` | Practice stand-in page and replay adapter. Kills, errors, aces, blocks and assists are exact from the play-by-play. Attempts are matched per set to the box score, and digs are spread evenly. |
+| `src/app-practice-bb.js` | Basketball practice page (`/practice-bb`, `?periods=4` for quarters). |
 | `src/app-replay.js`, `src/app-setup.js` | `/replay` demo and `/setup` page (bookmarklet, console code, Tampermonkey script). |
 | `src/styles.css`, `src/site.css` | Board styles (dark by design, used in a dim truck or press row) and site additions. Tokens are on `:root, :host`, because the CSS also runs inside a shadow root. |
 | `tools/build_site.py` | Builds everything in `site/`, including the HTML templates, the Tampermonkey script and the root `vercel.json`. Holds `VERSION` and `PROD_ORIGIN`. |
 | `data/msu-wvb-roster-2026.json` | MSU 2026 volleyball roster, bundled so MSU players can be starred before a match loads. |
 | `data/msu-idaho-2026-10-01.txt` | Hand-transcribed play-by-play of MSU 3–0 Idaho, the source for the replay and practice pages. |
-| `test/` | Node replay test, Playwright e2e test, mock StatBroadcast page and its generator. |
+| `test/` | Node replay test (volleyball), Node basketball test, Playwright e2e test, the two mock StatBroadcast pages and their generator. |
 
 ## Gotchas
 

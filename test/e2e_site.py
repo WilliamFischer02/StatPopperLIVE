@@ -18,10 +18,11 @@ ROOT = Path(__file__).resolve().parent.parent
 SITE = ROOT / "site"
 SHOTS = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "test"
 MOCK = (ROOT / "test" / "mock-statbroadcast.html").read_text(encoding="utf-8")
+MOCK_BB = (ROOT / "test" / "mock-statbroadcast-bb.html").read_text(encoding="utf-8")  # event ids starting with 7
 BOARD = os.environ.get("E2E_BASE", "https://board.test").rstrip("/")
 LIVE = BOARD != "https://board.test"
 TYPES = {".html": "text/html", ".js": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json"}
-CLEAN = {"/": "index.html", "/setup": "setup.html", "/practice": "practice.html", "/replay": "replay.html"}
+CLEAN = {"/": "index.html", "/setup": "setup.html", "/practice": "practice.html", "/practice-bb": "practice-bb.html", "/replay": "replay.html"}
 BOOKMARK = f"""(function(){{if(window.SPB&&window.SPB.show){{window.SPB.show();return}}window.__spbOrigin='{BOARD}';var s=document.createElement('script');s.src='{BOARD}/spb.js?v='+Date.now();document.documentElement.appendChild(s)}})();"""
 errors, fails = [], []
 _live_cache = {}
@@ -48,7 +49,7 @@ def route(r):
             return r.fulfill(status=200, content_type=TYPES.get(f.suffix, "text/plain"), body=f.read_bytes())
         return r.fulfill(status=404, body="not found")
     if url.startswith("https://stats.statbroadcast.com/"):
-        return r.fulfill(status=200, content_type="text/html", body=MOCK)
+        return r.fulfill(status=200, content_type="text/html", body=MOCK_BB if re.search(r"[?&]id=7", url) else MOCK)
     return r.abort()
 
 
@@ -289,6 +290,102 @@ with sync_playwright() as p:
     note = bw4.evaluate("document.getElementById('notice').hidden ? '' : document.getElementById('notice').textContent")
     check("running reader 0.0.9" in note, f"board flags an outdated reader ({note[:70]})")
     ctx3.close()
+
+    # 10. Basketball: the reader tells the sport from the box score, and the board follows.
+    ctx5 = b.new_context(viewport={"width": 1440, "height": 900})
+    ctx5.route("**/*", route)
+    ctx5.on("page", lambda pg: pg.on("pageerror", lambda e: errors.append(f"bb {pg.url}: {e}")))
+    bb = ctx5.new_page()
+    bb.on("pageerror", lambda e: errors.append(f"bb board: {e}"))
+    bb.goto(BOARD + "/")
+    bb.fill("#feed", "700001")
+    with ctx5.expect_page() as bbpop:
+        bb.click("#feedform button[type=submit]")
+    bst = bbpop.value
+    bst.wait_for_load_state()
+    bst.evaluate(BOOKMARK)
+    bstart = bst.evaluate("g.find((st) => st.period === 2 && st.clock < 1040)")
+    runs_seen, live_seen = [], []
+    for n in range(bstart - 4, bstart + 26):
+        bst.evaluate(f"showStep({n})")
+        bst.wait_for_timeout(260)
+        runs_seen += [t for t in bb.evaluate("[...document.querySelectorAll('.tcard .big')].map(e => e.textContent)") if "Run" in t]
+        live_seen += bb.evaluate("[...document.querySelectorAll('.pcard.is-live .livedot')].map(e => e.textContent)")
+    bb.wait_for_timeout(600)
+    sb = board_state(bb)
+    print("  ", sb)
+    check(sb["mode"] == "Live" and sb["conn"].startswith("Basketball"), f"basketball page is detected and goes Live ({sb['conn'][:50]})")
+    pops = bb.evaluate("[...document.querySelectorAll('.pcard .pname')].map(e => e.textContent)")
+    check(len(sb["home"]) == 3 and len(sb["away"]) == 3 and pops and not any(x in ("Kills", "Digs", "Attacks", "Aces") for x in pops)
+          and any(x in ("Points", "Rebounds", "Shooting", "Points & Rebounds", "3-Pointers", "Assists") for x in pops), f"3 cards per side with basketball pops ({sorted(set(pops))})")
+    bdock = bst.evaluate("document.getElementById('spb-dock').shadowRoot.getElementById('dt').textContent")
+    junk = [x for x in sb["home"] + sb["away"] if re.match(r"^\*?(team|totals?|game|1st half|\d+)\b", x, re.I)]
+    check("8 + 8 players" in bdock and not junk, f"both box styles read; TEAM, Totals and by-period rows are not players ({bdock}; {junk})")
+    game = bb.evaluate("({ status: document.querySelector('.sl-pts small').textContent, boxes: [...document.querySelectorAll('.sl-sets small')].map(e => e.textContent), tabs: [...document.querySelectorAll('.tab')].map(e => e.textContent), info: document.querySelector('.serve').textContent })")
+    check(bool(re.match(r"^2nd Half · \d{1,2}:\d{2}$", game["status"])) and game["boxes"] == ["pf", "pf"] and game["tabs"] == ["Last play", "Leaders"] and (" by " in game["info"] or "Tied" in game["info"]),
+          f"game panel shows the half, clock, whole-game fouls (reader started mid-half) and Leaders tab ({game})")
+    title_score = bst.evaluate("document.title.match(/(\\d+), \\w+ (\\d+)/).slice(1, 3).map(Number)")
+    check(bb.evaluate("document.querySelector('.sl-pts').firstChild.textContent") == f"{title_score[1]}–{title_score[0]}", f"score matches the stats page title ({title_score})")
+    check(len(runs_seen) > 0, f"a scoring run shows on a team card during the home run ({sorted(set(runs_seen))[:3]})")
+    check(len(live_seen) > 0, f"cards go live after plays ({sorted(set(live_seen))[:4]})")
+    bb.click(".tab[data-tab=rot]")
+    bb.wait_for_timeout(150)
+    leaders = bb.evaluate("[...document.querySelectorAll('.leaders li')].map(e => e.textContent)")
+    check(len(leaders) == 6 and any("PTS" in x for x in leaders), f"Leaders tab lists points, rebounds and assists for both teams ({leaders[:2]})")
+    bb.click(".tab[data-tab=plays]")
+    # The list's points column adds up to the score, so made-attempted cells and the StatCrew columns both parse.
+    bb.click("#layoutseg button[data-layout='all']")
+    bb.wait_for_timeout(250)
+    lst = bb.evaluate("['home', 'away'].map(s => [document.querySelectorAll('.q-' + s + ' .prow').length, [...document.querySelectorAll('.q-' + s + ' .prow:first-child .pv .l')].map(e => e.textContent).join('+'), [...document.querySelectorAll('.q-' + s + ' .prow .pv:first-child .v')].reduce((a, e) => a + (+e.textContent), 0)])")
+    opts = bb.evaluate("[...document.querySelectorAll('#statA option')].map(o => o.value)")
+    check(lst[0][0] == 8 and lst[1][0] == 8 and lst[0][1] == "PTS+REB" and "pts" in opts and "k" not in opts and [lst[0][2], lst[1][2]] == [title_score[1], title_score[0]],
+          f"list shows every player with PTS and REB, and the points add up to the score ({lst})")
+    bb.select_option("#statB", "ast")
+    bb.wait_for_timeout(150)
+    check(bb.evaluate("JSON.parse(localStorage.getItem('spb:liststats:bb'))") == ["pts", "ast"] and bb.evaluate("localStorage.getItem('spb:liststats')") is None, "basketball list stats are saved apart from volleyball's")
+    bb.click("#layoutseg button[data-layout='3']")
+    bb.click("#checkbtn")
+    bb.wait_for_timeout(200)
+    chk = bb.evaluate("document.getElementById('check').textContent")
+    check("Basketball" in chk and "Reading OK" in chk and "period 2 of" in chk, "Reader check reports Basketball, the period and the clock")
+    bb.click("#checkbtn")
+    check("few minutes" in bb.evaluate("document.querySelector('.pcard button[data-act=pass]').title"), "Pass tooltip uses basketball wording")
+    bb.screenshot(path=str(SHOTS / "e2e-board-bb.png"))
+    # A tab title the reader does not know: the score comes from the box score, the period is left open.
+    bst.evaluate("document.title = 'Ridgeline at Montana St. - Live Stats'")
+    bb.wait_for_timeout(1200)
+    fb = bb.evaluate("({ score: document.querySelector('.sl-pts').firstChild.textContent, status: document.querySelector('.sl-pts small').textContent, conn: document.getElementById('conn').textContent, cards: document.querySelectorAll('.pcard').length })")
+    check(fb["score"] == f"{title_score[1]}–{title_score[0]}" and fb["cards"] == 6 and "Ridgeline at Montana St." in fb["conn"], f"an unknown tab title falls back to the box score for the score ({fb})")
+    # Same board, a volleyball page next: it switches back by itself.
+    bb.click("#newlink")
+    bb.fill("#feed", "670274")
+    bb.click("#feedform button[type=submit]")
+    # Not wait_for_url: on Playwright 1.47 (CI) it misses the load of a same-tab navigation that only changes the query.
+    bst.wait_for_function("location.search.includes('670274') && document.readyState === 'complete' && typeof rp !== 'undefined'", timeout=10000)
+    bst.evaluate(BOOKMARK)
+    vstart = bst.evaluate("rp.findScore(3, 13, 9)")
+    for n in range(vstart - 2, vstart + 1):
+        bst.evaluate(f"showRally({n})")
+        bst.wait_for_timeout(300)
+    bb.wait_for_timeout(700)
+    sv = board_state(bb)
+    vb_ui = bb.evaluate("({ tabs: [...document.querySelectorAll('.tab')].map(e => e.textContent), boxes: [...document.querySelectorAll('.sl-sets small')].map(e => e.textContent), opts: [...document.querySelectorAll('#statA option')].map(o => o.value), pops: [...document.querySelectorAll('.pcard .pname')].map(e => e.textContent) })")
+    check(sv["conn"].startswith("Volleyball") and vb_ui["tabs"] == ["Last play", "Rotation"] and vb_ui["boxes"] == ["sets", "sets"] and "k" in vb_ui["opts"] and not any(x in ("Rebounds", "Shooting", "3-Pointers") for x in vb_ui["pops"]),
+          f"the board switches back to volleyball on a volleyball page ({sv['conn'][:40]}; {vb_ui['tabs']})")
+    # Basketball practice page through the board.
+    bb.click("#newlink")
+    bb.click("#practicebb")
+    bst.wait_for_url("**/practice-bb", timeout=10000)
+    bb.wait_for_timeout(4000)
+    sp = board_state(bb)
+    check(sp["conn"].startswith("Basketball") and "practice page" in sp["conn"] and len(sp["home"]) == 3, f"basketball practice page links to the board ({sp['conn'][:60]})")
+    # In-tab overlay on a basketball page.
+    bst.locator("#spb-dock").locator("#here").click()
+    bst.wait_for_timeout(500)
+    ovb = "document.getElementById('spb-host').shadowRoot"
+    check(bst.evaluate(f"{ovb}.querySelectorAll('.q-home .pcard').length") == 3 and bst.evaluate(f"[...{ovb}.querySelectorAll('.tab')].map(e => e.textContent).join()") == "Last play,Leaders"
+          and bst.evaluate(f"[...{ovb}.querySelectorAll('#statA option')].map(o => o.value).includes('pts')"), "in-tab overlay shows the basketball board")
+    ctx5.close()
 
     board.close()
     check(not errors, "no page errors" + ("" if not errors else ": " + " | ".join(errors[:5])))

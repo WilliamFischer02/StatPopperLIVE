@@ -1,13 +1,618 @@
-/* Stat Pop Board 0.4.1: reads only the page you have open and shares it with the board window on this computer. */
+/* Stat Pop Board 0.5.1: reads only the page you have open and shares it with the board window on this computer. */
 (function () {
 'use strict';
 if (window.SPB && window.SPB.version) { if (!window.__spbNoReader && window.SPB.show) window.SPB.show(); return; }
 var cs = document.currentScript;
-var SPB = { version: "0.4.1" };
+var SPB = { version: "0.5.1" };
 SPB.origin = window.__spbOrigin || (cs && cs.src ? new URL(cs.src, location.href).origin : null) || "https://stat-pop-board.vercel.app";
-SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.4.1' : null;
+SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v=0.5.1' : null;
 SPB.fontsHref = "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap";
 SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos":"OH"},{"uni":"5","first":"Keely","last":"Culler","pos":"OH"},{"uni":"6","first":"Teagan","last":"Jaynes","pos":"S"},{"uni":"7","first":"Lauren","last":"Schloe","pos":"MB/OPP"},{"uni":"9","first":"Maggie","last":"Rhew","pos":"S/DS"},{"uni":"11","first":"Elli","last":"Esko","pos":"OH"},{"uni":"12","first":"Afton","last":"Thomsen","pos":"L/DS"},{"uni":"13","first":"Jolene","last":"Green Ewen","pos":"MB"},{"uni":"14","first":"Taylor","last":"McDonald","pos":"MH/OPP"},{"uni":"15","first":"Teya","last":"Yeomans","pos":"OH"},{"uni":"16","first":"Haven","last":"Rich","pos":"L/DS"},{"uni":"17","first":"Alice","last":"Steman","pos":"MB"},{"uni":"18","first":"Karli","last":"Heidemann","pos":"OH"},{"uni":"22","first":"Joelie","last":"Spelts","pos":"MB"},{"uni":"23","first":"Elli","last":"Tufto","pos":"OH"},{"uni":"45","first":"Nicolette","last":"Noble","pos":"L/DS"}] };
+/*
+ * PopBasketball: the basketball half of PopEngine. Pure logic, no DOM. The engine (engine.js) owns the
+ * card selection, Pin, Pass, Hide, stars and rotation rules; this file supplies everything that differs
+ * for basketball: the stat line, what counts as notable, the pops, runs, fouls, alerts and play parsing.
+ *
+ * Snapshot contract (what a page reader must produce for basketball):
+ *   { sport:'bb', status:'pre'|'live'|'final', period:Number (0 = unknown), periods: 2|4|0,
+ *     clock:'12:34'|null, intermission:Boolean, rawStatus:String, set: period, score:{home,away},
+ *     setsWon:{home:0,away:0},
+ *     teams:{ home:{code,name,players:[P],totals?:P,extra?:X}, away:{...} } }
+ *   P = { uni, first, last, min, fgm, fga, tpm, tpa, ftm, fta, oreb, dreb, reb, ast, stl, blk, to, pf, pts }
+ *   X = { paint, offTo, second, fast, bench }   (optional team extras, when the page lists them)
+ *
+ * Cadence: volleyball counts rallies. Basketball has no rallies, so the engine's counter advances once
+ * per update in which the score or any stat changed (a "play"). Windows below are in plays.
+ */
+(function (root) {
+  'use strict';
+
+  const SIDES = ['home', 'away'];
+  const other = (s) => (s === 'home' ? 'away' : 'home');
+  const num = (v) => (Number.isFinite(+v) ? +v : 0);
+  const playerKey = (side, uni) => side + ':' + uni;
+  const FIELDS = ['min', 'fgm', 'fga', 'tpm', 'tpa', 'ftm', 'fta', 'oreb', 'dreb', 'reb', 'ast', 'stl', 'blk', 'to', 'pf', 'pts'];
+
+  const ma = (m, a) => m + '-' + a;
+  const pc = (v) => (v == null || !Number.isFinite(v) ? '—' : (v * 100).toFixed(1));
+  const mmss = (secs) => { secs = Math.max(0, Math.round(secs)); return Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0'); };
+
+  function derive(p) {
+    const q = { uni: String(p.uni), first: p.first || '', last: p.last || '' };
+    for (const f of FIELDS) q[f] = num(p[f]);
+    if (q.reb < q.oreb + q.dreb) q.reb = q.oreb + q.dreb;
+    const calc = 2 * q.fgm + q.tpm + q.ftm;
+    if (p.pts == null || (q.pts === 0 && calc > 0)) q.pts = calc;
+    q.fgPct = q.fga > 0 ? q.fgm / q.fga : null;
+    q.tpPct = q.tpa > 0 ? q.tpm / q.tpa : null;
+    q.ftPct = q.fta > 0 ? q.ftm / q.fta : null;
+    return q;
+  }
+
+  function teamTotals(t) {
+    if (t.totals) return derive({ uni: 'TM', ...t.totals });
+    const sum = { uni: 'TM' };
+    for (const f of FIELDS) sum[f] = 0;
+    for (const p of t.players) for (const f of FIELDS) sum[f] += num(p[f]);
+    return derive(sum);
+  }
+
+  // ------------------------------------------------------------ game time
+
+  const periodsOf = (s) => (num(s.periods) === 4 ? 4 : 2);
+  const periodLen = (s) => (periodsOf(s) === 4 ? 600 : 1200);
+  // "12:34", or "45.3" in the last minute. Returns seconds left in the period, or null.
+  function clockSecs(c) {
+    const t = String(c == null ? '' : c).trim();
+    let m = /^(\d{1,2}):(\d{2})(?:\.\d+)?$/.exec(t);
+    if (m) return +m[1] * 60 + +m[2];
+    m = /^:?(\d{1,2})\.(\d)$/.exec(t);
+    if (m) return +m[1];
+    return null;
+  }
+  // Game seconds played. From the period and clock when the page gives them; otherwise estimated from
+  // the combined score (about 3.6 points a minute), held inside the current period when that is known.
+  function elapsed(s) {
+    const P = periodsOf(s), L = periodLen(s), reg = P * L;
+    const per = num(s.period);
+    const est = (num(s.score && s.score.home) + num(s.score && s.score.away)) / 3.6 * 60;
+    if (s.status === 'final') return Math.max(reg, per > P ? reg + (per - P) * 300 : reg);
+    if (!per) return Math.min(reg, est);
+    const start = per <= P ? (per - 1) * L : reg + (per - P - 1) * 300;
+    const len = per <= P ? L : 300;
+    if (s.intermission) return start + len;
+    const c = clockSecs(s.clock);
+    if (c != null && c <= len) return start + (len - c);
+    return Math.max(start, Math.min(start + len, est));
+  }
+  // Notability scales with 10-minute blocks played (4 at the end of regulation), so 8 points is a pop
+  // in the first ten minutes and ordinary by the fourth.
+  const eff = (s) => Math.max(0.8, elapsed(s) / 600);
+
+  function periodLabel(s) {
+    const P = periodsOf(s), per = num(s.period);
+    if (s.status === 'final') return 'Final' + (per > P ? (per - P > 1 ? ' · ' + (per - P) + 'OT' : ' · OT') : '');
+    if (s.status === 'pre') return 'Pregame';
+    if (!per) return s.rawStatus ? String(s.rawStatus).slice(0, 18) : 'Live';
+    const name = per > P ? (per - P > 1 ? (per - P) + 'OT' : 'OT') : P === 4 ? 'Q' + per : per === 1 ? '1st Half' : '2nd Half';
+    if (s.intermission) return per === P / 2 ? 'Halftime' : 'End of ' + (per >= P ? (per === P ? 'Regulation' : name) : name);
+    return name;
+  }
+  const periodWord = (s) => (periodsOf(s) === 4 ? 'quarter' : 'half');
+
+  // ------------------------------------------------------------ notability
+
+  // Foul trouble, 0 = none. Five fouls is out; four is trouble any time; three before the break and two
+  // in the opening quarter of the game are worth a pop too.
+  function foulLevel(pf, s) {
+    const reg = periodsOf(s) * periodLen(s), t = elapsed(s);
+    if (pf >= 5) return 1.6;
+    if (pf === 4) return t < reg ? 1.3 : 0.9;
+    if (pf === 3) return t < reg / 2 ? 1.05 : t < reg * 0.75 ? 0.6 : 0;
+    if (pf === 2) return t < reg / 4 ? 0.8 : 0;
+    return 0;
+  }
+
+  // 0 = not worth a pop, ~1 = solid, 2-3 = standout.
+  function norms(p, e, s) {
+    const tier = e < 1.5 ? 0 : e < 2.5 ? 1 : 2;
+    const n = (v, par, mins) => (v >= mins[tier] ? Math.min(3, v / (par * e)) : 0);
+    const N = {
+      pts: n(p.pts, 3.4, [6, 8, 10]),
+      reb: n(p.reb, 1.9, [4, 5, 6]),
+      ast: n(p.ast, 1.15, [3, 4, 5]),
+      stl: n(p.stl, 0.55, [2, 3, 3]),
+      blk: n(p.blk, 0.5, [2, 2, 3]),
+      tpm: n(p.tpm, 0.6, [2, 3, 3]),
+    };
+    N.fg = p.fga >= [4, 6, 8][tier] && p.fgm >= [3, 4, 5][tier] && p.fgPct >= 0.5
+      ? Math.min(3, (p.fgPct - 0.38) / 0.16 + (p.fgm === p.fga ? 0.4 : 0)) : 0;
+    N.tp = N.tpm > 0 ? (p.tpPct >= 0.4 ? N.tpm + (p.tpPct - 0.4) * 1.5 : N.tpm * 0.7) : 0;
+    const ftMin = [4, 6, 8][tier];
+    N.ft = p.fta >= ftMin && p.ftPct >= 0.8 ? Math.min(2, 0.55 + 0.3 * (p.ftm / ftMin) + (p.ftm === p.fta ? 0.3 : 0)) : 0;
+    N.pf = s ? foulLevel(p.pf, s) : 0;
+    return N;
+  }
+
+  const combo = (x, y) => (x > 0 && y > 0 ? Math.sqrt(x * y) * 1.12 + 0.15 : 0);
+  const dd = (p, a, b) => (p[a] >= 10 && p[b] >= 10 ? 0.5 : 0);
+  const shotParts = (p) => [{ v: ma(p.fgm, p.fga), l: 'FG' }].concat(p.tpa ? [{ v: ma(p.tpm, p.tpa), l: '3PT' }] : [], p.fta ? [{ v: ma(p.ftm, p.fta), l: 'FT' }] : []);
+
+  // Player pops. `name` is the label on the board; change it here to match the graphics software's buttons.
+  const POPS = [
+    { id: 'pts', name: 'Points', uses: ['pts'],
+      score: (p, N) => N.pts,
+      parts: (p) => [{ v: p.pts, l: 'PTS' }].concat(shotParts(p)) },
+    { id: 'shoot', name: 'Shooting', uses: ['fg'],
+      score: (p, N) => (N.fg > 0 && N.pts > 0 ? 0.4 * N.pts + 0.7 * N.fg : 0),
+      parts: (p) => [{ v: ma(p.fgm, p.fga), l: 'FG' }, { v: pc(p.fgPct), l: 'FG%' }].concat(p.tpa ? [{ v: ma(p.tpm, p.tpa), l: '3PT' }] : []) },
+    { id: 'three', name: '3-Pointers', uses: ['tpm'],
+      score: (p, N) => N.tp,
+      parts: (p) => [{ v: ma(p.tpm, p.tpa), l: '3PT' }].concat(p.tpa >= 3 ? [{ v: pc(p.tpPct), l: '3P%' }] : []) },
+    { id: 'ft', name: 'Free Throws', uses: ['ft'],
+      score: (p, N) => N.ft, parts: (p) => [{ v: ma(p.ftm, p.fta), l: 'FT' }] },
+    { id: 'reb', name: 'Rebounds', uses: ['reb'],
+      score: (p, N) => N.reb,
+      parts: (p) => [{ v: p.reb, l: 'REB' }].concat(p.oreb + p.dreb === p.reb && p.oreb ? [{ v: p.oreb, l: 'OFF' }, { v: p.dreb, l: 'DEF' }] : []) },
+    { id: 'ast', name: 'Assists', uses: ['ast'],
+      score: (p, N) => N.ast, parts: (p) => [{ v: p.ast, l: 'AST' }].concat(p.to ? [{ v: p.to, l: 'TO' }] : []) },
+    { id: 'stl', name: 'Steals', uses: ['stl'],
+      score: (p, N) => N.stl, parts: (p) => [{ v: p.stl, l: 'STL' }] },
+    { id: 'blk', name: 'Blocks', uses: ['blk'],
+      score: (p, N) => N.blk, parts: (p) => [{ v: p.blk, l: 'BLK' }] },
+    { id: 'ptsreb', name: 'Points & Rebounds', uses: ['pts', 'reb'],
+      score: (p, N) => combo(N.pts, N.reb) + dd(p, 'pts', 'reb'),
+      parts: (p) => [{ v: p.pts, l: 'PTS' }, { v: p.reb, l: 'REB' }] },
+    { id: 'ptsast', name: 'Points & Assists', uses: ['pts', 'ast'],
+      score: (p, N) => combo(N.pts, N.ast) + dd(p, 'pts', 'ast'),
+      parts: (p) => [{ v: p.pts, l: 'PTS' }, { v: p.ast, l: 'AST' }] },
+    { id: 'line', name: 'Points, Reb & Ast', uses: ['pts', 'reb', 'ast'],
+      score: (p, N) => (N.pts > 0 && N.reb > 0 && N.ast > 0 ? Math.cbrt(N.pts * N.reb * N.ast) * 1.2 + 0.15
+        + ([p.pts, p.reb, p.ast].every((v) => v >= 10) ? 1 : 0) : 0),
+      parts: (p) => [{ v: p.pts, l: 'PTS' }, { v: p.reb, l: 'REB' }, { v: p.ast, l: 'AST' }] },
+    { id: 'rebblk', name: 'Rebounds & Blocks', uses: ['reb', 'blk'],
+      score: (p, N) => combo(N.reb, N.blk),
+      parts: (p) => [{ v: p.reb, l: 'REB' }, { v: p.blk, l: 'BLK' }] },
+    { id: 'stlblk', name: 'Steals & Blocks', uses: ['stl', 'blk'],
+      score: (p, N) => combo(N.stl, N.blk),
+      parts: (p) => [{ v: p.stl, l: 'STL' }, { v: p.blk, l: 'BLK' }] },
+    { id: 'pf', name: 'Fouls', uses: ['pf'],
+      score: (p, N) => N.pf, parts: (p) => [{ v: p.pf, l: 'PF' }] },
+  ];
+
+  const WORDS = { pts: 'points', reb: 'rebounds', ast: 'assists', stl: 'steals', blk: 'blocks', tpm: 'threes' };
+  const ACTIVITY_MINS = { pts: 6, reb: 4, ast: 3, stl: 2, blk: 2 };
+  const activity = (p) => Object.keys(ACTIVITY_MINS).reduce((a, f) => a + p[f] / ACTIVITY_MINS[f], 0);
+
+  function badges(p, N) {
+    const out = [];
+    if (p.pf >= 5) out.push('Fouled out');
+    else if (N.pf >= 1) out.push('Foul trouble');
+    const cats = ['pts', 'reb', 'ast', 'stl', 'blk'];
+    const tens = cats.filter((f) => p[f] >= 10);
+    if (tens.length >= 3) out.push('Triple-double');
+    else if (tens.length === 2) out.push('Double-double');
+    else if (tens.length === 1) {
+      const near = cats.filter((f) => p[f] >= 8 && p[f] < 10).sort((a, b) => p[b] - p[a])[0];
+      if (near) out.push(`${10 - p[near]} ${WORDS[near].replace(/s$/, p[near] === 9 ? '' : 's')} from a double-double`);
+    }
+    if (p.fgm >= 4 && p.fgm === p.fga) out.push('Perfect from the field');
+    return out;
+  }
+
+  // ------------------------------------------------------------ play parsing
+
+  const ACTS = {
+    three: { stat: 'tpm', label: '3-pointer', w: 1.2 }, dunk: { stat: 'pts', label: 'Dunk', w: 1.2 },
+    layup: { stat: 'pts', label: 'Layup', w: 1 }, fg: { stat: 'pts', label: 'Basket', w: 1 },
+    ft: { stat: 'pts', label: 'Free throw', w: 0.4 }, rebound: { stat: 'reb', label: 'Rebound', w: 0.5 },
+    oreb: { stat: 'reb', label: 'Offensive rebound', w: 0.7 }, assist: { stat: 'ast', label: 'Assist', w: 0.7 },
+    steal: { stat: 'stl', label: 'Steal', w: 1 }, block: { stat: 'blk', label: 'Block', w: 1 },
+  };
+
+  // Reads one play line in StatCrew style ("GOOD! 3 PTR by SMITH,JOHN", "REBOUND (DEF) by ...") or in
+  // sentence style ("John Smith made 3-pt. jump shot (assist by ...)"). tools = { namesIn, teamIn }.
+  function parsePlay(text, snapshot, index, tools) {
+    const out = { text, server: null, actor: null, act: null, positive: false, blockers: [], assister: null, alert: null, extras: [] };
+    const s = String(text || '').trim();
+    const team = tools.teamIn(s, snapshot);
+    if (/\btime[- ]?out\b/i.test(s)) out.alert = { kind: 'timeout', side: /media|\btv\b|official/i.test(s) ? null : team };
+    else if (/technical|flagrant|eject/i.test(s)) out.alert = { kind: 'penalty', side: team };
+    else if (/\b(video |official )?review\b|\bmonitor\b/i.test(s)) out.alert = { kind: 'challenge', side: team };
+    else if (/\bsubs?\b\s*(in|out)?\s*:|substitution|\benters\b|goes to the bench/i.test(s)) out.alert = { kind: 'sub', side: team };
+
+    const am = s.match(/assist(?:ed)?\s+by\s+([^.;)]+)/i);
+    if (am) out.assister = tools.namesIn(am[1], index)[0] || null;
+    const core = am ? s.replace(am[0], ' ') : s;
+    const names = tools.namesIn(core, index);
+    const missed = /\bmiss(ed|es)?\b/i.test(core);
+    const made = !missed && /\b(good!?|made|makes|scores?)\b/i.test(core);
+    const set = (act, positive) => { out.act = act; out.actor = names[0] || null; out.positive = positive; };
+
+    if (made) {
+      if (/free throw|\bft\b/i.test(core)) set('ft', true);
+      else if (/\b3[- ]?(pt|ptr|pointer|point)s?\b|\bthree\b/i.test(core)) set('three', true);
+      else if (/\bdunk\b/i.test(core)) set('dunk', true);
+      else if (/\blay-?up\b/i.test(core)) set('layup', true);
+      else set('fg', true);
+      if (out.assister) out.extras.push({ ...out.assister, act: 'assist' });
+    } else if (missed) set('miss', false);
+    else if (/\bblock(ed|s)?\b/i.test(core)) set('block', true);
+    else if (/\bsteals?\b/i.test(core)) set('steal', true);
+    else if (/\brebound\b/i.test(core)) { if (!/dead ?ball|\bteam\b/i.test(core)) set(/\boff/i.test(core) ? 'oreb' : 'rebound', true); }
+    else if (/\bassist\b/i.test(s)) { set('assist', true); out.actor = out.assister || names[0] || null; }
+    else if (/turnover|turnovr|travel|bad pass/i.test(core)) set('turnover', false);
+    else if (/\bfoul\b/i.test(core)) set('foul', false);
+    else if (names[0]) out.actor = names[0];
+    if (!out.actor) out.positive = false;
+    if (out.actor && !out.positive) out.actor = { ...out.actor, negative: true };
+    return out;
+  }
+
+  // ------------------------------------------------------------ tracking
+
+  const freshMem = () => ({
+    last: null,          // { period, score, stats: key -> derived line, totals: {home,away}, sig }
+    scoring: [],         // { side, key|null, n, t, tick } per scoring event, oldest first
+    periodStart: null,   // { period, totals: {home,away}, exact }
+    foulBase: null,      // { fouls: {home,away}, exact }: team fouls when this half or quarter began
+    finished: null,      // { period, label, tick, stats: {home,away}, pts: {home,away} }
+    lastFg: { home: null, away: null },    // game seconds at each team's last made field goal
+    foulAlerts: [],      // { tick, text, sub }
+    bonusAt: { home: null, away: null },
+    leader: null, leadAlert: null,
+    view: null,
+  });
+
+  const sigOf = (s) => JSON.stringify([s.status, s.period, !!s.intermission, s.score,
+    SIDES.map((side) => s.teams[side].players.map((p) => FIELDS.map((f) => num(p[f])).join(',')).join(';'))]);
+
+  const teamFouls = (s, side) => {
+    const t = s.teams[side];
+    return t.totals && num(t.totals.pf) > 0 ? num(t.totals.pf) : t.players.reduce((a, p) => a + num(p.pf), 0);
+  };
+  const diffLine = (a, b) => { const d = { uni: 'TM' }; for (const f of FIELDS) d[f] = num(a[f]) - num(b[f]); return derive(d); };
+
+  // Runs once per update, before the play lines are read. Advances the play counter when anything
+  // changed, attributes new points to players, and sets a "just now" pin from the box-score change
+  // itself, so the board reacts even when the page's play-by-play wording is not recognised.
+  function track(ctx, s) {
+    const mem = ctx.mem, b = mem.bb, t = elapsed(s);
+    const stats = {};
+    for (const side of SIDES) for (const p of s.teams[side].players) stats[playerKey(side, p.uni)] = derive(p);
+    const totals = { home: teamTotals(s.teams.home), away: teamTotals(s.teams.away) };
+    const cur = { period: num(s.period), score: { home: num(s.score.home), away: num(s.score.away) }, stats, totals, sig: sigOf(s) };
+    const fouls = { home: teamFouls(s, 'home'), away: teamFouls(s, 'away') };
+    const prev = b.last;
+    b.last = cur;
+    if (!prev) {
+      const fromTip = cur.score.home + cur.score.away === 0 && fouls.home + fouls.away === 0;
+      b.periodStart = { period: cur.period, totals, exact: fromTip };
+      b.foulBase = { fouls: fromTip ? fouls : { home: 0, away: 0 }, exact: fromTip };
+      b.leader = cur.score.home === cur.score.away ? null : cur.score.home > cur.score.away ? 'home' : 'away';
+      mem.lastScore = { set: cur.period, home: cur.score.home, away: cur.score.away };
+      return false;
+    }
+    if (cur.sig === prev.sig) return false;
+    mem.rally += 1;
+    mem.lastScore = { set: cur.period, home: cur.score.home, away: cur.score.away };
+    const P = periodsOf(s);
+
+    // A new period: close the old one out (for the period summary line) and start the foul count again
+    // (overtime carries the last regulation period's fouls).
+    if (cur.period > prev.period && prev.period > 0) {
+      // The break was only seen if this update is a small step from the last one. After a jump (the page
+      // was paused over the break, or a different part of the game was loaded) the last reading is not
+      // the end of the old period, so the new period's fouls and the old period's summary are unknown.
+      const jump = cur.period - prev.period > 1
+        || Math.abs(cur.score.home + cur.score.away - prev.score.home - prev.score.away) > 8
+        || Math.abs(fouls.home + fouls.away - prev.totals.home.pf - prev.totals.away.pf) > 3;
+      if (jump) {
+        b.periodStart = { period: cur.period, totals, exact: false };
+        b.foulBase = { fouls: { home: 0, away: 0 }, exact: false };
+        b.bonusAt = { home: null, away: null };
+      } else {
+        closePeriod(ctx, s, prev);
+        b.periodStart = { period: cur.period, totals: prev.totals, exact: true };
+        if (cur.period <= P) { b.foulBase = { fouls: { home: prev.totals.home.pf, away: prev.totals.away.pf }, exact: true }; b.bonusAt = { home: null, away: null }; }
+      }
+    } else if (s.intermission && (!b.finished || b.finished.period !== cur.period)) {
+      closePeriod(ctx, s, cur);
+    }
+
+    // Who scored. One event per scorer; points the box score has not caught up with wait as key null.
+    for (const side of SIDES) {
+      const ds = cur.score[side] - prev.score[side];
+      const scorers = [];
+      for (const p of s.teams[side].players) {
+        const k = playerKey(side, p.uni), was = prev.stats[k];
+        const dp = was ? stats[k].pts - was.pts : 0;
+        if (dp > 0 && dp <= 6) scorers.push({ key: k, n: dp });
+      }
+      if (ds > 0 && ds <= 8) {
+        const sum = scorers.reduce((a, x) => a + x.n, 0);
+        if (scorers.length && sum === ds) for (const x of scorers) b.scoring.push({ side, key: x.key, n: x.n, t, tick: mem.rally });
+        else b.scoring.push({ side, key: scorers.length === 1 ? scorers[0].key : null, n: ds, t, tick: mem.rally });
+      } else if (ds === 0 && scorers.length === 1) {
+        // The box caught up with a basket already on the scoreboard: name its scorer.
+        const open = b.scoring.slice().reverse().find((x) => x.side === side && x.key === null && x.n === scorers[0].n && mem.rally - x.tick <= 6);
+        if (open) open.key = scorers[0].key;
+      }
+      if (totals[side].fgm > prev.totals[side].fgm) b.lastFg[side] = t;
+    }
+    if (b.scoring.length > 120) b.scoring.splice(0, b.scoring.length - 120);
+
+    // Box-score pins: the most telling thing that changed on each side.
+    const ORDER = ['three', 'fg', 'block', 'steal', 'assist', 'oreb', 'ft', 'rebound'];
+    for (const side of SIDES) {
+      let best = null;
+      for (const p of s.teams[side].players) {
+        const k = playerKey(side, p.uni), now = stats[k], was = prev.stats[k];
+        if (!was) continue;
+        const up = (f) => { const d = now[f] - was[f]; return d > 0 && d <= 3; };
+        const act = up('tpm') ? 'three' : up('fgm') ? 'fg' : up('blk') ? 'block' : up('stl') ? 'steal' : up('ast') ? 'assist'
+          : up('oreb') ? 'oreb' : up('ftm') ? 'ft' : up('reb') ? 'rebound' : null;
+        if (act) {
+          mem.involvement.push({ rally: mem.rally, key: k, w: ACTS[act].w });
+          if (!best || ORDER.indexOf(act) < ORDER.indexOf(best.act)) best = { key: k, act };
+        }
+        // Foul trouble: the foul that takes a player to a level worth knowing about.
+        if (now.pf > was.pf && now.pf - was.pf <= 2 && foulLevel(now.pf, s) >= 1 && foulLevel(now.pf, s) > foulLevel(was.pf, s)) {
+          b.foulAlerts.push({ tick: mem.rally, text: (now.pf >= 5 ? 'Fouled out' : 'Foul trouble') + ` · ${s.teams[side].code} #${now.uni} ${now.last}`, sub: `${now.pf} fouls` });
+        }
+      }
+      if (best) mem.pins[side] = { key: best.key, stat: ACTS[best.act].stat, label: ACTS[best.act].label, rally: mem.rally };
+    }
+    b.foulAlerts = b.foulAlerts.filter((a) => mem.rally - a.tick <= 4);
+
+    // Bonus: the play on which a team's fouls first put the other team at the line.
+    for (const side of SIDES) {
+      const bn = bonusOf(b, s, side);
+      if (bn && !b.bonusAt[side]) b.bonusAt[side] = { tick: mem.rally, text: bn };
+      else if (bn && b.bonusAt[side].text !== bn) b.bonusAt[side] = { tick: mem.rally, text: bn };
+    }
+
+    // Lead changes and ties, once the game has settled (five minutes in).
+    const lead = cur.score.home === cur.score.away ? null : cur.score.home > cur.score.away ? 'home' : 'away';
+    if (lead !== b.leader && t >= 300 && cur.score.home + cur.score.away > prev.score.home + prev.score.away) {
+      b.leadAlert = lead ? { tick: mem.rally, text: `${s.teams[lead].code} takes the lead`, sub: `${cur.score[lead]}–${cur.score[other(lead)]}` }
+        : { tick: mem.rally, text: `Tied at ${cur.score.home}`, sub: '' };
+    }
+    b.leader = lead;
+    if (mem.consoleAlert && mem.consoleAlert.rally < mem.rally - 3) mem.consoleAlert = null;
+    return true;
+  }
+
+  function closePeriod(ctx, s, at) {
+    const b = ctx.mem.bb;
+    if (!b.periodStart || !b.periodStart.exact || (b.finished && b.finished.period === at.period)) return;
+    const label = periodLabel({ ...s, status: 'live', intermission: false, period: at.period });
+    b.finished = { period: at.period, label, tick: ctx.mem.rally,
+      stats: { home: diffLine(at.totals.home, b.periodStart.totals.home), away: diffLine(at.totals.away, b.periodStart.totals.away) } };
+  }
+
+  // Team fouls this half (or quarter). exact is false when the reader started partway through it,
+  // and then n is the team's fouls for the whole game.
+  function foulsOf(b, s, side) {
+    const total = teamFouls(s, side);
+    if (!b.foulBase || !b.foulBase.exact) return { n: total, exact: false };
+    return { n: Math.max(0, total - b.foulBase.fouls[side]), exact: true };
+  }
+  // What `side`'s fouls have given the other team: '' | 'Bonus' | 'Double bonus'.
+  function bonusOf(b, s, side) {
+    const f = foulsOf(b, s, side);
+    if (!f.exact) return '';
+    if (periodsOf(s) === 4) return f.n >= 5 ? 'Bonus' : '';
+    return f.n >= 10 ? 'Double bonus' : f.n >= 7 ? 'Bonus' : '';
+  }
+
+  // Runs, in points. active: unanswered points right now. ext: the best "14-3" stretch that is still going.
+  function runs(b, side) {
+    const sc = b.scoring;
+    let active = 0, i = sc.length - 1;
+    for (; i >= 0 && sc[i].side === side; i--) active += sc[i].n;
+    const startT = active && sc[i + 1] ? (i >= 0 ? sc[i].t : sc[i + 1].t) : null;
+    let ext = null;
+    if (sc.length && sc[sc.length - 1].side === side) {
+      let a = 0, o = 0;
+      for (let j = sc.length - 1; j >= 0; j--) {
+        if (sc[j].side === side) a += sc[j].n; else o += sc[j].n;
+        if (o > 5) break;
+        if (o > 0 && sc[j].side === side && a >= 9 && a - o >= 7 && a >= 3 * o && (!ext || a - o > ext.a - ext.b)) ext = { a, b: o, t: j > 0 ? sc[j - 1].t : sc[j].t };
+      }
+    }
+    return { active, startT, ext };
+  }
+
+  // A player scoring his team's points by himself: "9 straight MSU points".
+  function hotOf(ctx, side) {
+    const b = ctx.mem.bb;
+    const mine = b.scoring.filter((x) => x.side === side);
+    if (!mine.length) return null;
+    const lastOne = mine[mine.length - 1];
+    if (!lastOne.key || ctx.mem.rally - lastOne.tick > 12) return null;
+    let n = 0;
+    for (let i = mine.length - 1; i >= 0 && mine[i].key === lastOne.key; i--) n += mine[i].n;
+    return n >= 7 ? { key: lastOne.key, n } : null;
+  }
+
+  // ------------------------------------------------------------ team card lines
+
+  function teamCards(ctx, s, side, e) {
+    const mem = ctx.mem, b = mem.bb;
+    const T = teamTotals(s.teams[side]), O = teamTotals(s.teams[other(side)]);
+    const code = s.teams[side].code, oc = s.teams[other(side)].code;
+    const X = s.teams[side].extra || null, XO = s.teams[other(side)].extra || null;
+    const c = [];
+    const now = elapsed(s), clocked = clockSecs(s.clock) != null;
+
+    const fin = b.finished;
+    if (fin && (s.intermission || mem.rally - fin.tick <= 6)) {
+      const A = fin.stats[side], B = fin.stats[other(side)];
+      if (A.fga > 0) c.push({ id: 'persum', score: 9, big: `${fin.label}: ${A.pts} PTS, ${pc(A.fgPct)} FG%`, sub: `${oc} ${B.pts} PTS, ${pc(B.fgPct)} FG%` });
+    }
+
+    const r = runs(b, side);
+    const own = num(s.score[side]), opp = num(s.score[other(side)]);
+    const span = (t0) => (clocked && t0 != null && now - t0 >= 20 ? `over ${mmss(now - t0)}` : '');
+    if (r.active >= 6) {
+      c.push({ id: 'run', score: 10 + r.active / 2, live: true, big: `${r.active}-0 Scoring Run`,
+        sub: [span(r.startT), `from ${own - r.active}–${opp}`].filter(Boolean).join(' · ') });
+    } else if (r.ext) {
+      c.push({ id: 'run', score: 8 + (r.ext.a - r.ext.b) * 0.3, live: true, big: `${r.ext.a}-${r.ext.b} Run`,
+        sub: [span(r.ext.t), `from ${own - r.ext.a}–${opp - r.ext.b}`].filter(Boolean).join(' · ') });
+    }
+
+    // Field-goal drought, only when the page gives a game clock and the reader has seen this team's last make.
+    if (clocked && s.status === 'live' && !s.intermission && b.lastFg[side] != null && now - b.lastFg[side] >= 240) {
+      const mins = Math.floor((now - b.lastFg[side]) / 60);
+      c.push({ id: 'drought', score: 1.6 + mins / 4, big: `No Field Goal in ${mins}+ Min`, sub: `last ${code} basket ${mmss(now - b.lastFg[side])} ago` });
+    }
+
+    const bn = bonusOf(b, s, other(side));
+    if (bn && s.status === 'live') {
+      const f = foulsOf(b, s, other(side));
+      c.push({ id: 'bonus', score: 1.2 + (bn === 'Double bonus' ? 0.3 : 0), big: `In the ${bn}`, sub: `${oc} ${f.n} team fouls this ${periodWord(s)}` });
+    }
+
+    if (T.fga >= 15) {
+      const d = T.fgPct - (O.fga >= 15 ? O.fgPct : T.fgPct);
+      const n = (T.fgPct - 0.42) / 0.05 + Math.max(0, d) / 0.06;
+      if (T.fgPct >= 0.47 && n >= 1) c.push({ id: 'fg', score: Math.min(4, n), big: `Team FG% ${pc(T.fgPct)}`, sub: `${ma(T.fgm, T.fga)} · ${oc} ${pc(O.fgPct)} (${ma(O.fgm, O.fga)})` });
+    }
+    if (T.tpa >= 8 && T.tpm >= 4 && (T.tpPct >= 0.4 || T.tpm >= O.tpm + 4)) {
+      c.push({ id: 'tp', score: 0.9 + (T.tpPct - 0.33) / 0.07 * 0.5 + Math.max(0, T.tpm - O.tpm) / 4, big: `Team 3PT ${ma(T.tpm, T.tpa)}`, sub: `${pc(T.tpPct)}% · ${oc} ${ma(O.tpm, O.tpa)}` });
+    }
+    const rebSub = `${T.oreb ? T.oreb + ' offensive · ' : ''}${oc} ${O.reb}`;
+    if (T.reb >= 8 && (T.reb >= O.reb + 6 || (T.oreb >= 2.5 * e && T.oreb >= O.oreb + 3))) {
+      c.push({ id: 'reb', score: 0.9 + (T.reb - O.reb) / 6, big: `${T.reb} Team Rebounds`, sub: rebSub });
+    }
+    if (O.to >= Math.max(5, 3.6 * e) && O.to >= T.to + 3) {
+      c.push({ id: 'tof', score: 1 + (O.to - T.to) / 4, big: `${O.to} Turnovers Forced`, sub: `${T.stl} steals · ${code} ${T.to} turnovers` });
+    }
+    if (T.fgm >= 10 && T.ast >= 0.62 * T.fgm && T.ast >= O.ast + 4) {
+      c.push({ id: 'ast', score: 0.9 + (T.ast - O.ast) / 5, big: `${T.ast} Team Assists`, sub: `on ${T.fgm} made FG · ${oc} ${O.ast}` });
+    }
+    if (T.blk >= Math.max(3, 1.3 * e) && T.blk >= O.blk + 2) c.push({ id: 'blk', score: 0.9 + (T.blk - O.blk) / 3, big: `${T.blk} Team Blocks`, sub: `${oc} ${O.blk}` });
+    if (T.stl >= Math.max(4, 2 * e) && T.stl >= O.stl + 3) c.push({ id: 'stl', score: 0.9 + (T.stl - O.stl) / 4, big: `${T.stl} Team Steals`, sub: `${oc} ${O.stl}` });
+    if (T.fta >= 8 && (T.ftPct >= 0.85 || T.fta >= O.fta + 8)) {
+      c.push({ id: 'ft', score: 0.85 + Math.max(0, T.fta - O.fta) / 10, big: `Team FT ${ma(T.ftm, T.fta)}`, sub: `${pc(T.ftPct)}% · ${oc} ${ma(O.ftm, O.fta)}` });
+    }
+    // Team extras, when the page lists them (points in the paint, off turnovers, bench and so on).
+    if (X && XO) {
+      const ex = (id, label, lead, base) => {
+        const a = num(X[id]), o = num(XO[id]);
+        if (X[id] != null && XO[id] != null && a >= base && a >= o + lead) c.push({ id: 'x' + id, score: 0.9 + (a - o) / (lead * 2), big: `${a} ${label}`, sub: `${oc} ${o}` });
+      };
+      ex('paint', 'Points in the Paint', 8, 12); ex('offTo', 'Points off Turnovers', 6, 8);
+      ex('bench', 'Bench Points', 8, 10); ex('fast', 'Fast Break Points', 6, 8); ex('second', '2nd Chance Points', 6, 8);
+    }
+
+    // Fillers: the everyday lines, greyed, so each team card always has something to read.
+    const have = new Set(c.map((x) => x.id));
+    const fill = (id, ok, ratio, big, sub) => {
+      if (!have.has(id) && ok) c.push({ id, dim: true, score: 0.05 + 0.5 * Math.max(0, Math.min(1, ratio)), big, sub });
+    };
+    const pl = (n, word) => `${n} Team ${word}${+n === 1 ? '' : 's'}`;
+    fill('fg', T.fga >= 4, (T.fgPct - 0.3) / 0.25, `Team FG% ${pc(T.fgPct)}`, `${ma(T.fgm, T.fga)} · ${oc} ${pc(O.fgPct)} (${ma(O.fgm, O.fga)})`);
+    fill('reb', T.reb > 0, T.reb / (9 * e), pl(T.reb, 'Rebound'), rebSub);
+    fill('tp', T.tpa > 0, T.tpm / (2 * e), `Team 3PT ${ma(T.tpm, T.tpa)}`, `${oc} ${ma(O.tpm, O.tpa)}`);
+    fill('ast', T.ast > 0, T.ast / (3.5 * e), pl(T.ast, 'Assist'), `on ${T.fgm} made FG · ${oc} ${O.ast}`);
+    fill('ft', T.fta >= 2, T.ftm / (4 * e), `Team FT ${ma(T.ftm, T.fta)}`, `${oc} ${ma(O.ftm, O.fta)}`);
+    fill('tof', O.to > 0, O.to / (3.5 * e), `${O.to} Turnover${O.to === 1 ? '' : 's'} Forced`, `${code} ${T.to} turnovers`);
+    if (s.status === 'pre' && !c.length) {
+      c.push({ id: 'fg', dim: true, score: 0.06, big: 'Team FG% 0.0', sub: `${oc} 0.0` });
+      c.push({ id: 'reb', dim: true, score: 0.05, big: '0 Team Rebounds', sub: `${oc} 0` });
+      c.push({ id: 'tp', dim: true, score: 0.04, big: 'Team 3PT 0-0', sub: `${oc} 0-0` });
+    }
+    return c;
+  }
+
+  // ------------------------------------------------------------ alerts, header
+
+  function alerts(ctx, s) {
+    const mem = ctx.mem, b = mem.bb, out = [];
+    const P = periodsOf(s), per = num(s.period);
+    const h = num(s.score.home), a = num(s.score.away);
+    if (s.status === 'final') {
+      const w = h >= a ? 'home' : 'away';
+      out.push({ kind: 'final', sev: 'info', text: `Final · ${s.teams[w].code} wins ${s.score[w]}–${s.score[other(w)]}${per > P ? ' · OT' : ''}` });
+      return out;
+    }
+    if (s.intermission && s.status === 'live') out.push({ kind: 'break', sev: 'info', text: periodLabel(s), sub: `${s.teams.home.code} ${h}–${a} ${s.teams.away.code}` });
+    // Late and close: the last two minutes of regulation or overtime, one possession apart.
+    const c = clockSecs(s.clock);
+    if (!s.intermission && s.status === 'live' && per >= P && c != null && c <= 120 && Math.abs(h - a) <= 3) {
+      out.push({ kind: 'close', sev: 'crit', text: h === a ? 'Tie game' : 'One-possession game', sub: `${s.clock} left` });
+    }
+    for (const fa of b.foulAlerts) out.push({ kind: 'foul', sev: 'warn', text: fa.text, sub: fa.sub });
+    for (const side of SIDES) {
+      const at = b.bonusAt[side];
+      if (at && mem.rally - at.tick <= 4) out.push({ kind: 'bonus', sev: 'info', text: `${s.teams[other(side)].code} in the ${at.text.toLowerCase()}`, sub: `${s.teams[side].code} ${foulsOf(b, s, side).n} team fouls` });
+    }
+    if (b.leadAlert && mem.rally - b.leadAlert.tick <= 2) out.push({ kind: 'lead', sev: 'quiet', text: b.leadAlert.text, sub: b.leadAlert.sub });
+    if (mem.consoleAlert) {
+      const ca = mem.consoleAlert;
+      const words = { timeout: 'Timeout', challenge: 'Review', penalty: 'Technical', sub: 'Substitution' };
+      const sev = { timeout: 'info', challenge: 'violet', penalty: 'warn', sub: 'quiet' }[ca.kind];
+      out.push({ kind: ca.kind, sev, text: words[ca.kind] + (ca.side ? ' · ' + s.teams[ca.side].code : ''), sub: ca.text });
+    }
+    return out;
+  }
+
+  // The parts of the view that belong to basketball: period and clock, team fouls, the margin line and leaders.
+  function header(ctx, s) {
+    const b = ctx.mem.bb;
+    const h = num(s.score.home), a = num(s.score.away);
+    const fouls = {}, leaders = {};
+    for (const side of SIDES) {
+      const f = foulsOf(b, s, side);
+      fouls[side] = { n: f.n, exact: f.exact, bonus: bonusOf(b, s, side) };
+      const ps = s.teams[side].players.map(derive);
+      leaders[side] = [['pts', 'PTS'], ['reb', 'REB'], ['ast', 'AST']].map(([f2, l]) => {
+        const top = ps.slice().sort((x, y) => y[f2] - x[f2])[0];
+        return top && top[f2] > 0 ? { l, v: top[f2], uni: top.uni, last: top.last } : { l, v: 0, uni: '', last: '' };
+      });
+    }
+    let info = '';
+    if (s.status !== 'pre') {
+      const lead = h === a ? null : h > a ? 'home' : 'away';
+      info = lead ? `${s.teams[lead].code} by ${Math.abs(h - a)}` : `Tied at ${h}`;
+      for (const side of SIDES) {
+        const r = runs(b, side);
+        if (r.active >= 6) info += ` · ${s.teams[side].code} on a ${r.active}-0 run`;
+        else if (r.ext) info += ` · ${s.teams[side].code} on a ${r.ext.a}-${r.ext.b} run`;
+      }
+    }
+    return { period: { label: periodLabel(s), clock: s.status === 'live' && !s.intermission && clockSecs(s.clock) != null ? String(s.clock) : '',
+      n: num(s.period), of: periodsOf(s), word: periodWord(s) }, fouls, leaders, info };
+  }
+
+  const listStats = (p) => ({ pts: p.pts, reb: p.reb, ast: p.ast, stl: p.stl, blk: p.blk, fg: ma(p.fgm, p.fga), tp: ma(p.tpm, p.tpa),
+    ft: ma(p.ftm, p.fta), pf: p.pf, to: p.to, min: p.min });
+
+  const api = {
+    id: 'bb', FIELDS, POPS, WORDS, ACTS, derive, teamTotals, norms, badges, activity, parsePlay, eff, elapsed, clockSecs,
+    periodLabel, periodsOf, foulLevel, freshMem, track, teamCards, alerts, header, hotOf, listStats, sigOf,
+    // Cadence, in plays (score or stat changes): about three plays to one volleyball rally.
+    cfg: { passRallies: 25, dwellRallies: 8, pinWindow: 2, recentWindow: 30 },
+    activeFields: ['pts', 'reb', 'ast', 'stl', 'blk', 'pf'],
+    leadFields: ['pts', 'reb', 'ast', 'stl', 'blk'],
+    highMins: { pts: 10, reb: 6, ast: 4, stl: 3, blk: 3 },
+    highWord: 'Game-high',
+    singleMins: { pts: 6, reb: 4, ast: 3, stl: 2, blk: 2, tpm: 2 },
+    singleOk: (x) => ['pts', 'reb', 'ast', 'stl', 'blk', 'three'].includes(x.id),
+    // A "just now" pin only takes a card when the stat behind it is worth reading: already notable,
+    // or the second-plus three, steal or block.
+    pinWorthy: (p, N, pin) => (N[pin.stat] > 0) || (['tpm', 'stl', 'blk'].includes(pin.stat) && p[pin.stat] >= 2),
+    pinWhen: (d) => (d === 0 ? 'Just now · ' : 'Moments ago · '),
+    passText: 'Skip this player for the next few minutes',
+    unit: ['play', 'plays'],
+  };
+  root.PopBasketball = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})(SPB);
+
 /*
  * PopEngine: turns a stats snapshot + new play-console lines into a small set of
  * pop-ready cards. Pure logic, no DOM. Runs in the browser and in Node (tests).
@@ -17,9 +622,15 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
  *     score:{home,away}, setsWon:{home,away},
  *     teams:{ home:{code,name,players:[P], totals?:T}, away:{...} } }
  *   P = { uni, first, last, k, e, ta, a, sa, se, re, dig, bs, ba, be }
+ *
+ * Basketball (sport:'bb') has its own contract and rules in basketball.js. The engine picks the sport
+ * from snapshot.sport on every update and starts over when it changes.
  */
 (function (root) {
   'use strict';
+
+  // The basketball rules: already on the page in the browser bundle, required in Node.
+  const BB = root.PopBasketball || (typeof module !== 'undefined' && module.exports && typeof require === 'function' ? require('./basketball.js') : null);
 
   const SIDES = ['home', 'away'];
   const other = (s) => (s === 'home' ? 'away' : 'home');
@@ -48,7 +659,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
   function swapSides(s, on) {
     if (!on || !s) return s;
     return { ...s, score: { home: s.score.away, away: s.score.home },
-      setsWon: { home: s.setsWon.away, away: s.setsWon.home },
+      setsWon: s.setsWon ? { home: s.setsWon.away, away: s.setsWon.home } : { home: 0, away: 0 },
       teams: { home: s.teams.away, away: s.teams.home } };
   }
 
@@ -237,6 +848,33 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
   const ACTIVITY_MINS = { k: 4, dig: 5, a: 10, tb: 2, sa: 2 };
   const activityOf = (p) => Object.keys(ACTIVITY_MINS).reduce((a, f) => a + p[f] / ACTIVITY_MINS[f], 0);
 
+  // What the engine needs to know about a sport. Volleyball is defined here; basketball.js supplies the
+  // same shape (plus track, teamCards, alerts and header, which volleyball keeps inside create()).
+  const VB = {
+    id: 'vb', pops: VB_POPS, words: STAT_WORDS, derive: vbDerive, norms: vbNorms, eff: vbEffSets, activity: activityOf,
+    fields: ['k', 'e', 'ta', 'a', 'sa', 'se', 're', 'dig', 'bs', 'ba', 'be'],
+    leadFields: ['k', 'dig', 'a', 'tb', 'sa'],
+    highMins: { k: 5, dig: 6, a: 12, tb: 3, sa: 2 }, highWord: 'Match-high',
+    singleMins: { k: 4, dig: 5, a: 10, tb: 2, sa: 1, pts: 8 },
+    singleOk: (x, p) => x.id !== 'atk' && (x.id !== 'pts' || [p.k, p.sa, p.tb].filter((v) => v > 0).length >= 2),
+    badges(p) {
+      const out = [];
+      if (p.k >= 8 && p.e === 0) out.push('0 errors');
+      if (['k', 'dig', 'a'].filter((f) => p[f] >= 10).length >= 2) out.push('Double-double');
+      return out;
+    },
+    act: (a) => ({ stat: ACT_STAT[a], label: ACT_LABEL[a], w: a === 'dig' ? 0.5 : 1 }),
+    cfg: { passRallies: 10, dwellRallies: 4, pinWindow: 1, recentWindow: 12 },
+    pinWorthy: () => true,
+    pinWhen: (d) => (d === 0 ? 'Just now · ' : 'Last rally · '),
+    listStats: (p) => ({ k: p.k, e: p.e, ta: p.ta, pct: fmtPct(p.pct), a: p.a, sa: p.sa, se: p.se, dig: p.dig,
+      bs: p.bs, ba: p.ba, tb: fmtHalf(p.tb), pts: fmtHalf(p.pts) }),
+    passText: 'Skip this player for the next 10 rallies',
+    unit: ['rally', 'rallies'],
+  };
+  const BBS = BB ? { ...BB, pops: BB.POPS, words: BB.WORDS, fields: BB.FIELDS,
+    act: (a) => BB.ACTS[a] || { stat: null, label: '', w: 1 } } : null;
+
   function create(opts) {
     opts = opts || {};
     const clock = opts.now || (() => Date.now());
@@ -244,8 +882,12 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     // dwellRallies: a card that just arrived gets a stickiness bonus for this many rallies, so cards don't flicker.
     // maxCards: player cards per side (3 or 5; the full-list layout highlights maxCards rows).
     // Team card: one per side with minTeamLines..maxTeamLines stat lines, notable ones first.
+    let SP = VB;
     const cfg = { pops: VB_POPS, maxCards: 3, maxPops: 3, minPops: 2, minTeamLines: 3, maxTeamLines: 5, passRallies: 10,
       holdMs: 10 * 60 * 1000, dwellRallies: 4 };
+    function setSport(sp) {
+      SP = sp; cfg.pops = sp.pops; cfg.passRallies = sp.cfg.passRallies; cfg.dwellRallies = sp.cfg.dwellRallies;
+    }
     // held: cards William pinned with the Pin button, key -> { since, until } in clock ms.
     // restore: a player whose Pass was just undone; they come straight back on the next compute.
     const user = { hidden: new Set(), passed: {}, stars: { home: [], away: [] }, held: {}, restore: null };
@@ -262,11 +904,14 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         statAt: {}, prevStats: {}, rotateDue: { home: false, away: false },
         consoleAlert: null, setWon: null,
         prevTotals: null, setStart: null, finishedSet: null,
+        bb: BB ? BB.freshMem() : null,
       };
       user.passed = {};
       last = null;
     }
     reset();
+    // What basketball.js works with: the live memory (reset() replaces the object, hence the getter).
+    const ctx = { get mem() { return mem; }, cfg };
 
     // Summary rows that a page reader might still pass as players (team, totals, "Set 1", "Match"). The reader
     // rejects them too (v0.3.5); this is the second line of defence so they never reach a card or a total.
@@ -278,11 +923,10 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       return { ...s, teams: t };
     }
 
-    const STAT_FIELDS = ['k', 'e', 'ta', 'a', 'sa', 'se', 're', 'dig', 'bs', 'ba', 'be'];
     function trackStats(s) {
       for (const side of SIDES) for (const p of s.teams[side].players) {
         const key = playerKey(side, p.uni);
-        const h = STAT_FIELDS.map((f) => num(p[f])).join(',');
+        const h = SP.fields.map((f) => num(p[f])).join(',');
         if (mem.prevStats[key] !== h) { mem.prevStats[key] = h; mem.statAt[key] = mem.rally; }
       }
     }
@@ -366,23 +1010,24 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     function ingest(lines, snapshot, index, pointSide) {
       let pointPlay = null;
       for (const text of lines) {
-        const play = parsePlay(text, snapshot, index);
+        const play = SP === VB ? parsePlay(text, snapshot, index) : BB.parsePlay(text, snapshot, index, { namesIn, teamIn });
         play.rally = mem.rally;
         play.score = mem.lastScore ? { home: mem.lastScore.home, away: mem.lastScore.away } : null;
         mem.plays.push(play);
         if (play.alert) mem.consoleAlert = { ...play.alert, text: text, rally: mem.rally };
         if (play.positive && play.actor) {
           const a = play.actor;
-          mem.pins[a.side] = { key: playerKey(a.side, a.uni), stat: ACT_STAT[play.act], label: ACT_LABEL[play.act], rally: mem.rally };
-          mem.involvement.push({ rally: mem.rally, key: playerKey(a.side, a.uni), w: play.act === 'dig' ? 0.5 : 1 });
-          for (const b of play.blockers.slice(1)) mem.involvement.push({ rally: mem.rally, key: playerKey(b.side, b.uni), w: 1 });
+          const meta = SP.act(play.act);
+          mem.pins[a.side] = { key: playerKey(a.side, a.uni), stat: meta.stat, label: meta.label, rally: mem.rally };
+          mem.involvement.push({ rally: mem.rally, key: playerKey(a.side, a.uni), w: meta.w });
+          for (const b of (play.extras || play.blockers.slice(1))) mem.involvement.push({ rally: mem.rally, key: playerKey(b.side, b.uni), w: 1 });
         }
         if (play.server || play.act) pointPlay = play;
       }
       if (mem.plays.length > 60) mem.plays.splice(0, mem.plays.length - 60);
       // Involvement only counts for 12 rallies; drop older entries so the list never grows for a whole match.
-      if (mem.involvement.length > 80) mem.involvement = mem.involvement.filter((x) => mem.rally - x.rally <= 12);
-      trackServe(pointPlay, pointSide);
+      if (mem.involvement.length > 80) mem.involvement = mem.involvement.filter((x) => mem.rally - x.rally <= SP.cfg.recentWindow);
+      if (SP === VB) trackServe(pointPlay, pointSide);
     }
 
     // ---- runs
@@ -413,7 +1058,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       return vbDerive(sum);
     }
 
-    function teamCards(s, side, e) {
+    function vbTeamLines(s, side, e) {
       const T = teamTotals(s.teams[side]);
       const O = teamTotals(s.teams[other(side)]);
       const oc = s.teams[other(side)].code;
@@ -475,6 +1120,11 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         c.push({ id: 'kills', dim: true, score: 0.05, big: pl(T.k, 'Kill'), sub: `${oc} ${O.k}` });
         c.push({ id: 'blk', dim: true, score: 0.04, big: pl(fmtHalf(T.tb), 'Block'), sub: `${oc} ${fmtHalf(O.tb)}` });
       }
+      return c;
+    }
+
+    function teamCards(s, side, e) {
+      const c = SP === VB ? vbTeamLines(s, side, e) : BB.teamCards(ctx, s, side, e);
       const prev = mem.prevTeam[side];
       for (const x of c) if (prev.includes(x.id)) x.score += 0.2;
       c.sort((a, b) => b.score - a.score);
@@ -488,7 +1138,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     // ---- player cards
     function scorePlayer(p, side, e, highs, s, sv) {
       const key = playerKey(side, p.uni);
-      const N = vbNorms(p, e);
+      const N = SP.norms(p, e, s);
       let pops = cfg.pops.map((d) => {
         let sc = d.score(p, N);
         if (sc > 0 && highs[d.uses[0]] && highs[d.uses[0]].has(key)) sc += 0.25;
@@ -497,18 +1147,23 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       const seen = new Set();
       pops = pops.filter((x) => (x.group ? (seen.has(x.group) ? false : seen.add(x.group)) : true));
 
-      const badges = [];
-      if (p.k >= 8 && p.e === 0) badges.push('0 errors');
-      const dd = ['k', 'dig', 'a'].filter((f) => p[f] >= 10);
-      if (dd.length >= 2) badges.push('Double-double');
-      for (const f of ['k', 'dig', 'a', 'tb', 'sa']) if (highs[f] && highs[f].has(key)) badges.push('Match-high ' + STAT_WORDS[f]);
+      const badges = SP.badges(p, N);
+      for (const f of SP.leadFields) if (highs[f] && highs[f].has(key)) badges.push(SP.highWord + ' ' + SP.words[f]);
 
       const starred = (user.stars[side] || []).some((st) => matchesStar(p, st));
       const pin = mem.pins[side];
-      const pinned = !!(pin && pin.key === key && mem.rally - pin.rally <= 1);
+      const pinned = !!(pin && pin.key === key && mem.rally - pin.rally <= SP.cfg.pinWindow && SP.pinWorthy(p, N, pin));
       const hold = user.held[key] && user.held[key].until > clock() ? user.held[key] : null;
-      const serving = sv.side === side && sv.uni === p.uni && sv.streak >= 3;
-      const recent = mem.involvement.filter((x) => x.key === key && mem.rally - x.rally <= 12).reduce((a, x) => a + x.w, 0);
+      // A streak keeps a card live: a server on a run of points, or (basketball) one player scoring all of a team's points.
+      let streak = null;
+      if (SP === VB) {
+        if (sv.side === side && sv.uni === p.uni && sv.streak >= 3) streak = { text: `On serve · ${sv.streak} straight`, stat: p.sa > 0 ? 'sa' : null };
+      } else {
+        const hot = BB.hotOf(ctx, side);
+        if (hot && hot.key === key) streak = { text: `${hot.n} straight ${s.teams[side].code} points`, stat: 'pts' };
+      }
+      const serving = !!streak;
+      const recent = mem.involvement.filter((x) => x.key === key && mem.rally - x.rally <= SP.cfg.recentWindow).reduce((a, x) => a + x.w, 0);
       const best = pops[0] ? pops[0].score : 0;
       const second = pops[1] ? pops[1].score : 0;
       let impact = best + 0.35 * second + 0.2 * Math.min(4, recent);
@@ -516,8 +1171,8 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       if (serving) impact += 1.2;
       if (starred) impact += 0.35;
       if (pinned) impact += 100;
-      return { key, side, p, N, pops, badges, pinned, pin: pinned ? pin : null, serving, starred, impact, hold,
-        activity: activityOf(p) + 0.2 * Math.min(4, recent), eligible: pinned || serving || best >= 0.85 };
+      return { key, side, p, N, pops, badges, pinned, pin: pinned ? pin : null, serving, streak, starred, impact, hold,
+        activity: SP.activity(p) + 0.2 * Math.min(4, recent), eligible: pinned || serving || best >= 0.85 };
     }
 
     function cardFor(c, sv, teamLeads) {
@@ -528,7 +1183,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         if (x.score < 0.8 || pops.length >= cfg.maxPops) continue;
         if (!covered(x, pops)) pops.push(x);
       }
-      const force = c.pin ? c.pin.stat : (c.serving && p.sa > 0 ? 'sa' : null);
+      const force = c.pin ? c.pin.stat : (c.streak ? c.streak.stat : null);
       const raw = () => cfg.pops.map((d) => ({ id: d.id, name: d.name, uses: d.uses, score: d.score(p, c.N), parts: d.parts(p) }));
       const simplest = (a, b) => b.score - a.score || a.uses.length - b.uses.length || a.parts.length - b.parts.length;
       if (force && !pops.some((x) => x.uses.includes(force))) {
@@ -538,9 +1193,8 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       if (pops.length < cfg.minPops) {
         // Fewer notable options than the card should offer: add the player's strongest raw lines
         // (single stats the player actually has), shown greyed until they reach pop level.
-        const MINS = { k: 4, dig: 5, a: 10, tb: 2, sa: 1, pts: 8 };
-        const singles = raw().filter((x) => x.uses.length === 1 && x.id !== 'atk' && MINS[x.uses[0]] && p[x.uses[0]] > 0
-            && (x.id !== 'pts' || [p.k, p.sa, p.tb].filter((v) => v > 0).length >= 2))
+        const MINS = SP.singleMins;
+        const singles = raw().filter((x) => x.uses.length === 1 && MINS[x.uses[0]] && p[x.uses[0]] > 0 && SP.singleOk(x, p))
           .sort((a, b) => p[b.uses[0]] / MINS[b.uses[0]] - p[a.uses[0]] / MINS[a.uses[0]]);
         for (const x of singles) {
           if (pops.length >= cfg.minPops) break;
@@ -552,14 +1206,14 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         return { id: x.id, name: x.name, parts: x.parts, score: x.score, best: i === 0, live, dim: !live && x.score < 0.8 };
       });
       let tag = null;
-      if (c.pin) tag = { kind: 'live', text: (mem.rally - c.pin.rally === 0 ? 'Just now · ' : 'Last rally · ') + c.pin.label };
-      else if (c.serving) tag = { kind: 'serve', text: `On serve · ${sv.streak} straight` };
+      if (c.pin) tag = { kind: 'live', text: SP.pinWhen(mem.rally - c.pin.rally) + c.pin.label };
+      else if (c.serving) tag = { kind: 'serve', text: c.streak.text };
       let reason = c.badges.slice(0, 2).join(' · ');
       if (!reason) {
-        const lead = ['k', 'dig', 'a', 'tb', 'sa'].find((f) => teamLeads[f] === c.key);
-        if (lead) reason = 'Team leader · ' + STAT_WORDS[lead];
+        const lead = SP.leadFields.find((f) => teamLeads[f] === c.key);
+        if (lead) reason = 'Team leader · ' + SP.words[lead];
       }
-      if (c.serving && c.pin) reason = [`On serve · ${sv.streak} straight`, reason].filter(Boolean).join(' · ');
+      if (c.serving && c.pin) reason = [c.streak.text, reason].filter(Boolean).join(' · ');
       return { key: c.key, side: c.side, uni: p.uni, first: p.first, last: p.last, tag, reason, pops,
         starred: !!c.starred, impact: Math.round(c.impact * 100) / 100,
         held: c.hold ? { until: c.hold.until } : null,
@@ -569,9 +1223,9 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
 
     function playerCards(s, side, e, highs) {
       const sv = mem.serve;
-      const players = s.teams[side].players.map(vbDerive);
+      const players = s.teams[side].players.map(SP.derive);
       const teamLeads = {};
-      for (const f of ['k', 'dig', 'a', 'tb', 'sa']) {
+      for (const f of SP.leadFields) {
         const top = players.slice().sort((a, b) => b[f] - a[f])[0];
         if (top && top[f] > 0) teamLeads[f] = playerKey(side, top.uni);
       }
@@ -656,18 +1310,14 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         const ia = order.has(a.key) ? order.get(a.key) : 1e9, ib = order.has(b.key) ? order.get(b.key) : 1e9;
         return ia - ib || rank(b) - rank(a) || (parseInt(a.p.uni, 10) || 0) - (parseInt(b.p.uni, 10) || 0);
       }).map((c) => ({ key: c.key, uni: c.p.uni, first: c.p.first, last: c.p.last, top: order.has(c.key), starred: !!c.starred,
-        held: !!c.hold, live: !!c.pinned, stats: listStats(c.p) }));
+        held: !!c.hold, live: !!c.pinned, stats: SP.listStats(c.p) }));
       return { cards, list };
     }
 
-    // The two-stat view in the list layout picks from these, by field name.
-    const listStats = (p) => ({ k: p.k, e: p.e, ta: p.ta, pct: fmtPct(p.pct), a: p.a, sa: p.sa, se: p.se, dig: p.dig,
-      bs: p.bs, ba: p.ba, tb: fmtHalf(p.tb), pts: fmtHalf(p.pts) });
-
     function matchHighs(s) {
       const all = [];
-      for (const side of SIDES) for (const p of s.teams[side].players) all.push({ side, p: vbDerive(p) });
-      const mins = { k: 5, dig: 6, a: 12, tb: 3, sa: 2 };
+      for (const side of SIDES) for (const p of s.teams[side].players) all.push({ side, p: SP.derive(p) });
+      const mins = SP.highMins;
       const highs = {};
       for (const f in mins) {
         const max = Math.max(0, ...all.map((x) => x.p[f]));
@@ -678,6 +1328,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
 
     // ---- alerts
     function alerts(s) {
+      if (SP !== VB) return BB.alerts(ctx, s);
       const out = [];
       if (s.status === 'final') {
         const w = num(s.setsWon.home) > num(s.setsWon.away) ? 'home' : 'away';
@@ -734,13 +1385,15 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
 
     function compute() {
       const s = last;
-      const e = vbEffSets(s);
+      const e = SP.eff(s);
       const highs = matchHighs(s);
-      const sv = mem.serve;
+      const vb = SP === VB;
+      const sv = vb ? mem.serve : freshServe();
       const serverP = sv.uni && sv.side ? s.teams[sv.side].players.find((x) => String(x.uni) === String(sv.uni)) : null;
-      const rot = rotation(s);
+      const rot = vb ? rotation(s) : null;
       const predicted = sv.side && !serverP ? rot[sv.side].predictedServer : null;
       const view = {
+        sport: SP.id, unit: SP.unit, passText: SP.passText,
         teams: { home: { code: s.teams.home.code, name: s.teams.home.name }, away: { code: s.teams.away.code, name: s.teams.away.name } },
         set: num(s.set), score: { home: num(s.score.home), away: num(s.score.away) },
         setsWon: { home: num(s.setsWon.home), away: num(s.setsWon.away) }, status: s.status,
@@ -765,12 +1418,14 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         }),
         effSets: Math.round(e * 100) / 100,
       };
+      if (!vb) Object.assign(view, BB.header(ctx, s));
       for (const side of SIDES) {
         view.teamCards[side] = teamCards(s, side, e);
         const pc = playerCards(s, side, e, highs);
         view.playerCards[side] = pc.cards;
         view.players[side] = pc.list;
       }
+      if (!vb) mem.bb.view = view;
       return view;
     }
 
@@ -778,7 +1433,23 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       reset,
       update(snapshot, lines) {
         snapshot = cleanSnapshot(snapshot);
+        const sp = snapshot.sport === 'bb' && BBS ? BBS : VB;
+        if (sp !== SP) { setSport(sp); reset(); }
         const index = buildNameIndex(snapshot);
+        if (SP !== VB) {
+          snapshot = { ...snapshot, set: num(snapshot.period), setsWon: { home: 0, away: 0 } };
+          const changed = BB.track(ctx, snapshot);
+          // Only the game clock moved: keep every card exactly where it is and refresh the header.
+          if (!changed && !(lines && lines.length) && mem.bb.view && last) {
+            last = snapshot;
+            mem.bb.view = { ...mem.bb.view, ...BB.header(ctx, snapshot), alerts: BB.alerts(ctx, snapshot) };
+            return mem.bb.view;
+          }
+          ingest(lines || [], snapshot, index, null);
+          trackStats(snapshot);
+          last = snapshot;
+          return compute();
+        }
         const totals = { home: teamTotals(snapshot.teams.home), away: teamTotals(snapshot.teams.away) };
         if (!mem.setStart && num(snapshot.score.home) + num(snapshot.score.away) === 0) mem.setStart = totals;
         const pointSide = trackScore(snapshot, totals);
@@ -790,6 +1461,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         return compute();
       },
       view() { return last ? compute() : null; },
+      get sport() { return SP.id; },
       // Layout: how many player cards each side shows (3 or 5). The list layout highlights that many rows.
       setCards(n) { cfg.maxCards = n === 5 ? 5 : 3; },
       // Auto-rotate: the next compute swaps the non-pinned cards for the best players not yet on the board.
@@ -824,7 +1496,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     };
   }
 
-  const api = { create, parsePlay, buildNameIndex, fmtPct, vbDerive, VB_POPS, swapSides, matchesStar, normName };
+  const api = { create, parsePlay, buildNameIndex, fmtPct, vbDerive, VB_POPS, swapSides, matchesStar, normName, basketball: BB };
   root.PopEngine = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(SPB);
@@ -854,6 +1526,18 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     { id: 'a', label: 'Assists', l: 'AST' }, { id: 'sa', label: 'Aces', l: 'ACE' }, { id: 'pts', label: 'Points', l: 'PTS' },
     { id: 'pct', label: 'Hit %', l: 'HIT' }, { id: 'ta', label: 'Attempts', l: 'TA' }, { id: 'e', label: 'Errors', l: 'E' },
   ];
+  const LIST_STATS_BB = [
+    { id: 'pts', label: 'Points', l: 'PTS' }, { id: 'reb', label: 'Rebounds', l: 'REB' }, { id: 'ast', label: 'Assists', l: 'AST' },
+    { id: 'stl', label: 'Steals', l: 'STL' }, { id: 'blk', label: 'Blocks', l: 'BLK' }, { id: 'fg', label: 'Field goals', l: 'FG' },
+    { id: 'tp', label: '3-pointers', l: '3PT' }, { id: 'ft', label: 'Free throws', l: 'FT' }, { id: 'pf', label: 'Fouls', l: 'PF' },
+    { id: 'to', label: 'Turnovers', l: 'TO' }, { id: 'min', label: 'Minutes', l: 'MIN' },
+  ];
+  // Per sport: the stats on offer, the two shown by default, and where the choice is saved.
+  const LIST = {
+    vb: { stats: LIST_STATS, def: ['k', 'dig'], key: 'liststats' },
+    bb: { stats: LIST_STATS_BB, def: ['pts', 'reb'], key: 'liststats:bb' },
+  };
+  const listFor = (sport) => LIST[sport] || LIST.vb;
 
   const ROTATE_OPTIONS = [[0, 'Off'], [15, '15 s'], [30, '30 s'], [45, '45 s'], [60, '1 min'], [90, '1½ min'], [120, '2 min'],
     [180, '3 min'], [240, '4 min'], [300, '5 min'], [420, '7 min'], [600, '10 min']];
@@ -863,11 +1547,18 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
   function mountControls(host, opts) {
     opts = opts || {};
     const get = (k, d) => (opts.get ? opts.get(k, d) : d), set = (k, v) => { if (opts.set) opts.set(k, v); };
-    const settings = { layout: String(get('layout', '3')), listStats: get('liststats', ['k', 'dig']), rotate: +get('rotate', 0) || 0 };
+    const settings = { sport: 'vb', layout: String(get('layout', '3')), listStats: null, rotate: +get('rotate', 0) || 0 };
     if (!['3', '5', 'all'].includes(settings.layout)) settings.layout = '3';
-    if (!Array.isArray(settings.listStats) || settings.listStats.length !== 2 || !settings.listStats.every((id) => LIST_STATS.some((x) => x.id === id))) settings.listStats = ['k', 'dig'];
+    // The list layout's two stats are remembered per sport.
+    function loadListStats() {
+      const L = listFor(settings.sport);
+      const v = get(L.key, L.def);
+      settings.listStats = Array.isArray(v) && v.length === 2 && v.every((id) => L.stats.some((x) => x.id === id)) ? v : L.def.slice();
+    }
+    loadListStats();
     if (!ROTATE_OPTIONS.some((o) => o[0] === settings.rotate)) settings.rotate = 0;
-    const statSel = (id, label) => `<select id="${id}" aria-label="${label}">${LIST_STATS.map((x) => `<option value="${x.id}">${esc(x.label)}</option>`).join('')}</select>`;
+    const statOpts = () => listFor(settings.sport).stats.map((x) => `<option value="${x.id}">${esc(x.label)}</option>`).join('');
+    const statSel = (id, label) => `<select id="${id}" aria-label="${label}">${statOpts()}</select>`;
     host.innerHTML = `
       <span class="ctl">Cards <span class="seg" id="layoutseg" role="group" aria-label="Player card layout"><button type="button" data-layout="3">3 per team</button><button type="button" data-layout="5">5 per team</button><button type="button" data-layout="all">All players</button></span></span>
       <span class="ctl" id="liststats">Show ${statSel('statA', 'First stat')} &amp; ${statSel('statB', 'Second stat')}</span>
@@ -885,12 +1576,25 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       if (!b) return;
       settings.layout = b.dataset.layout; set('layout', settings.layout); changed('layout');
     });
-    const onStats = () => { settings.listStats = [$('#statA').value, $('#statB').value]; set('liststats', settings.listStats); changed('liststats'); };
+    const onStats = () => { settings.listStats = [$('#statA').value, $('#statB').value]; set(listFor(settings.sport).key, settings.listStats); changed('liststats'); };
     $('#statA').addEventListener('change', onStats);
     $('#statB').addEventListener('change', onStats);
     $('#rotate').addEventListener('change', () => { settings.rotate = +$('#rotate').value || 0; set('rotate', settings.rotate); changed('rotate'); });
     paint();
-    return { settings, setCountdown(text) { $('#rotatecount').textContent = text || ''; } };
+    return {
+      settings,
+      setCountdown(text) { $('#rotatecount').textContent = text || ''; },
+      // Switch the stat choices to another sport's. Returns true when the sport changed.
+      setSport(sport) {
+        sport = LIST[sport] ? sport : 'vb';
+        if (sport === settings.sport) return false;
+        settings.sport = sport;
+        loadListStats();
+        $('#statA').innerHTML = statOpts(); $('#statB').innerHTML = statOpts();
+        paint();
+        return true;
+      },
+    };
   }
 
   // Copy a line to the clipboard: the async API first, a hidden textarea when that is blocked.
@@ -987,6 +1691,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     const popLine = (c, p) => `${String(c.last).toUpperCase()} · ${p.name} · ${p.parts.map((x) => x.v + ' ' + x.l).join(' · ')}`;
     const isCopied = (text) => copied.text === text && Date.now() < copied.until;
 
+    let passText = 'Skip this player for the next 10 rallies';
     function playerCard(c, vals) {
       const live = c.tag && c.tag.kind === 'live';
       const tag = c.tag ? (live ? `<span class="livedot">${esc(c.tag.text)}</span>` : `<span class="tag-serve">${esc(c.tag.text)}</span>`) : '';
@@ -1006,7 +1711,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
           <div class="jersey" aria-label="Number ${esc(c.uni)}">${esc(c.uni)}</div>
           <div class="who"><div class="last">${esc(c.last)}</div><div class="meta">${tag}${reason}<span>${esc(c.first)}</span></div></div>
           <div class="acts">${pinBtn}${starBtn}
-            <button class="abtn" data-act="pass" data-key="${esc(c.key)}" title="Skip this player for the next 10 rallies">Pass</button>
+            <button class="abtn" data-act="pass" data-key="${esc(c.key)}" title="${esc(passText)}">Pass</button>
             <button class="abtn hide" data-act="hide" data-key="${esc(c.key)}" title="Hide this player for the rest of the match">Hide</button>
           </div>
         </div>
@@ -1016,7 +1721,8 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
 
     // List layout: every player on the side, two chosen stats, the carded players highlighted on top.
     function playerList(v, side, vals) {
-      const cols = listStats.map((id) => LIST_STATS.find((x) => x.id === id) || LIST_STATS[0]);
+      const defs = listFor(v.sport).stats;
+      const cols = listStats.map((id, i) => defs.find((x) => x.id === id) || defs[i]);
       const rows = v.players[side].map((r) => {
         const cells = cols.map((c) => {
           const id = r.key + '|list|' + c.id, val = r.stats[c.id];
@@ -1070,8 +1776,16 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
         <div class="grid"><div class="net" aria-hidden="true"></div>${cell(4)}${cell(3)}${cell(2)}${cell(5)}${cell(6)}${cell(1)}</div></div>`;
     }
 
+    // Basketball's second tab: each team's leaders in points, rebounds and assists.
+    function leadersPanel(v) {
+      const col = (side) => `<div class="court"><h4>${swatch(side, v.teams[side].code)}${esc(v.teams[side].code)}</h4>
+        <ul class="leaders">${(v.leaders[side] || []).map((x) => `<li><span class="lv">${esc(x.v)}</span><span class="ll">${esc(x.l)}</span><span class="ln">${x.last ? '#' + esc(x.uni) + ' ' + esc(x.last) : '—'}</span></li>`).join('')}</ul></div>`;
+      return `<div class="courts">${col('home')}${col('away')}</div>`;
+    }
+
     function drawGame(v) {
       lastView = v;
+      const bb = v.sport === 'bb';
       const sv = v.serving;
       const serveLine = sv ? `<span class="ball" style="background:var(--${sv.side})"></span>${esc(v.teams[sv.side].code)} serving${sv.last ? ` · <b>#${esc(sv.uni)} ${esc(sv.last)}</b>${sv.predicted ? ' · next' : ''}` : ''}${sv.streak >= 2 ? ` · ${sv.streak} straight` : ''}` : '';
       // An alert that just appeared (or changed) pulses once, so it registers while the eye is on the cards.
@@ -1084,26 +1798,39 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       const sc = (p) => (p.score ? `${p.score.home}–${p.score.away}` : '');
       const playsPanel = `<p class="lastplay">${lastPlay ? esc(lastPlay.text) : 'No plays yet.'}</p>
         <ul class="recent">${plays.filter((p) => p !== lastPlay).slice(0, 3).map((p) => `<li class="${p.alert ? 'is-alert' : ''}"><span class="sc">${sc(p)}</span><span>${esc(p.text)}</span></li>`).join('')}</ul>`;
-      const rotPanel = `<div class="courts">${court(v, 'home')}${court(v, 'away')}</div>
+      const rotPanel = bb ? '' : `<div class="courts">${court(v, 'home')}${court(v, 'away')}</div>
         <p class="note">From the serve order. Liberos not tracked.</p>`;
-      const status = v.status === 'final' ? 'Final' : v.status === 'pre' ? 'Pregame' : `Set ${v.set}`;
+      let status = v.status === 'final' ? 'Final' : v.status === 'pre' ? 'Pregame' : `Set ${v.set}`;
+      // Beside each team code: sets won (volleyball) or team fouls (basketball; amber once the other team is in the bonus).
+      let box = (side) => `<span class="sl-sets" title="Sets won">${v.setsWon[side]}<small>sets</small></span>`;
+      let infoLine = serveLine;
+      if (bb) {
+        status = esc(v.period.label) + (v.period.clock ? ` · <span class="sl-clock">${esc(v.period.clock)}</span>` : '');
+        box = (side) => {
+          const f = v.fouls[side];
+          const tip = f.exact ? `Team fouls this ${v.period.word}${f.bonus ? ' · ' + v.teams[side === 'home' ? 'away' : 'home'].code + ' in the ' + f.bonus.toLowerCase() : ''}` : 'Team fouls, whole game (the reader started partway through)';
+          return `<span class="sl-sets${f.bonus ? ' bonus' : ''}" title="${esc(tip)}">${f.n}<small>${f.exact ? 'fouls' : 'pf'}</small></span>`;
+        };
+        infoLine = esc(v.info || '');
+      }
       regions.game.innerHTML = `<div class="eyebrow">Game</div>
         <div class="scoreline">
-          <div class="sl-team home"><span class="sl-code">${esc(v.teams.home.code)}</span><span class="sl-sets" title="Sets won">${v.setsWon.home}<small>sets</small></span></div>
+          <div class="sl-team home"><span class="sl-code">${esc(v.teams.home.code)}</span>${box('home')}</div>
           <div class="sl-pts">${v.score.home}–${v.score.away}<small>${status}</small></div>
-          <div class="sl-team away"><span class="sl-sets" title="Sets won">${v.setsWon.away}<small>sets</small></span><span class="sl-code">${esc(v.teams.away.code)}</span></div>
+          <div class="sl-team away">${box('away')}<span class="sl-code">${esc(v.teams.away.code)}</span></div>
         </div>
-        <div class="serve">${serveLine}</div>
+        <div class="serve">${infoLine}</div>
         ${alerts ? `<div class="alerts">${alerts}</div>` : ''}
         <div class="tabs" role="tablist">
           <button class="tab" role="tab" data-act="tab" data-tab="plays" aria-selected="${tab === 'plays'}">Last play</button>
-          <button class="tab" role="tab" data-act="tab" data-tab="rot" aria-selected="${tab === 'rot'}">Rotation</button>
+          <button class="tab" role="tab" data-act="tab" data-tab="rot" aria-selected="${tab === 'rot'}">${bb ? 'Leaders' : 'Rotation'}</button>
         </div>
-        ${tab === 'plays' ? playsPanel : rotPanel}`;
+        ${tab === 'plays' ? playsPanel : bb ? leadersPanel(v) : rotPanel}`;
     }
 
     function drawFoot(v) {
-      const passed = (v.passed || []).map((h) => `<span class="chip passed" title="Back in ${h.rallies} ${h.rallies === 1 ? 'rally' : 'rallies'}">#${esc(h.uni)} ${esc(h.last)}<button data-act="unpass" data-key="${esc(h.key)}">Undo</button></span>`).join('');
+      const unit = v.unit || ['rally', 'rallies'];
+      const passed = (v.passed || []).map((h) => `<span class="chip passed" title="Back in ${h.rallies} ${h.rallies === 1 ? unit[0] : unit[1]}">#${esc(h.uni)} ${esc(h.last)}<button data-act="unpass" data-key="${esc(h.key)}">Undo</button></span>`).join('');
       const chips = v.hidden.map((h) => `<span class="chip">#${esc(h.uni)} ${esc(h.last)}<button data-act="unhide" data-key="${esc(h.key)}">Show</button></span>`).join('');
       regions.foot.innerHTML = (passed ? `<span>Passed:</span>${passed}` : '') + (chips ? `<span>Hidden:</span>${chips}` : '') + (handlers.footNote ? `<span>${handlers.footNote}</span>` : '');
     }
@@ -1112,11 +1839,15 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
       render(v) {
         if (!v) return;
         const vals = new Map();
+        passText = v.passText || passText;
+        boardEl.classList.toggle('sport-bb', v.sport === 'bb');
         boardEl.classList.toggle('cards-5', layout !== 'list' && !!v.layout && v.layout.cards === 5);
         boardEl.classList.toggle('layout-list', layout === 'list');
         drawGame(v); drawTeam(v); drawPlayers(v, 'home', vals); drawPlayers(v, 'away', vals); drawFoot(v);
         lastVals = vals;
       },
+      // Redraw only the game panel (the basketball clock ticks every second; the cards stay put).
+      renderGame(v) { if (v) drawGame(v); },
       setColors,
       // layout: 'cards' or 'list'. stats: the two list-layout stat ids (see LIST_STATS).
       setLayout(l, stats) {
@@ -1128,7 +1859,7 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
     };
   }
 
-  root.BoardView = { mountBoard, mountControls, copyText, esc, LIST_STATS, ROTATE_OPTIONS };
+  root.BoardView = { mountBoard, mountControls, copyText, esc, LIST_STATS, LIST_STATS_BB, ROTATE_OPTIONS };
 })(SPB);
 
 /*
@@ -1228,8 +1959,10 @@ SPB.rosters = { msuVolleyball: [{"uni":"2","first":"Lauren","last":"Greeny","pos
  * shows, then hands it to the Stat Pop Board window on this computer through
  * window.postMessage. It makes no network requests of its own.
  *
- *   - score, set and team codes from the tab title ("UI 18, MSU 24 - SET 3")
- *   - player and team rows from tables whose headers look like a volleyball box
+ *   - score, set (or period and clock) and team codes from the tab title
+ *     ("UI 18, MSU 24 - SET 3", "UM 31, MSU 38 - 2nd 12:34")
+ *   - player and team rows from tables whose headers look like a volleyball or a basketball box;
+ *     which of the two it finds decides the sport
  *   - new play-by-play / console sentences that name a rostered player
  */
 function startReader(SPB) {
@@ -1237,7 +1970,7 @@ function startReader(SPB) {
   const VERSION = SPB.version;
   const INSTANCE = Math.random().toString(36).slice(2, 10);
   const BOARD_ORIGIN = SPB.origin;
-  const eventId = new URLSearchParams(location.search).get('id') || (/practice/.test(location.pathname) ? 'practice' : 'page');
+  const eventId = new URLSearchParams(location.search).get('id') || (/practice-bb/.test(location.pathname) ? 'practice-bb' : /practice/.test(location.pathname) ? 'practice' : 'page');
   const store = {
     get(k, d) { try { const v = localStorage.getItem('spb:' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem('spb:' + k, JSON.stringify(v)); } catch (e) { /* settings just won't persist */ } },
@@ -1269,6 +2002,28 @@ function startReader(SPB) {
     };
   }
 
+  // Basketball: the part of the title after the dash ("2nd 12:34", "1st Half", "Q3 4:10", "Halftime",
+  // "End of 1st", "OT 2:05", "Final/OT"). The real wording has not been seen yet (first basketball game:
+  // 2026-11-15), so every piece is optional and the engine copes with whatever is missing.
+  // period: 1.. in regulation; ot: overtime number; periods: 2 or 4 when the wording says, else 0.
+  function parseBBStatus(raw) {
+    const t = String(raw || '');
+    const cm = t.match(/(\d{1,2}:\d{2}(?:\.\d)?)/) || t.match(/(?:^|\s)(:?\d{1,2}\.\d)(?=\s|$)/);
+    const out = { clock: cm ? cm[1] : null, final: /final/i.test(t), period: 0, ot: 0, periods: 0, intermission: /\bend\b|half\s*-?\s*time|intermission|\bbreak\b/i.test(t), halftime: false };
+    const noClock = cm ? t.replace(cm[1], ' ') : t;
+    const q = noClock.match(/\bQ(?:TR|UARTER)?\.?\s*([1-4])\b/i) || noClock.match(/\b([1-4])(?:st|nd|rd|th)\s+(?:q|qtr|quarter)/i);
+    const half = noClock.match(/\b(1st|2nd|first|second)\s+half\b/i) || noClock.match(/\bH(?:ALF)?\s*([12])\b/i);
+    const ot = noClock.match(/\b(\d)?\s*OT\s*(\d)?\b/i) || noClock.match(/overtime/i);
+    const ord = noClock.match(/\b([1-4])(?:st|nd|rd|th)\b/i) || noClock.match(/\b(?:period|per|prd)\.?\s*([1-4])\b/i);
+    if (q) { out.period = +q[1]; out.periods = 4; }
+    else if (half) { out.period = /^(1|1st|first)$/i.test(half[1]) ? 1 : 2; out.periods = 2; }
+    else if (ot && !out.final) out.ot = +(ot[1] || ot[2] || 1);
+    else if (ord) { out.period = +ord[1]; if (out.period > 2) out.periods = 4; }
+    else if (/half\s*-?\s*time|^\s*half\s*$/i.test(noClock)) { out.halftime = true; out.intermission = true; }
+    if (out.final && /OT/i.test(t)) out.ot = +((t.match(/(\d)\s*OT/i) || [])[1] || 1);
+    return out;
+  }
+
   // Column abbreviations. The live StatBroadcast volleyball box (first seen 2026-10-17,
   // SUU at MSU, event 670274) uses S # PLAYER K E TA HIT% AS SA DG BL -- so AS, DG and BL
   // are the real page's spellings for assists, digs and blocks. Without them looksVolleyball
@@ -1291,12 +2046,12 @@ function startReader(SPB) {
     for (const c of tr.cells) { const span = Math.max(1, +c.colSpan || 1); for (let i = 0; i < span; i++) out.push(c); }
     return out;
   }
-  function headerMap(table) {
+  function headerMap(table, keyOf) {
     let best = null;
     for (const tr of [...table.rows].slice(0, 4)) {
       const map = {}; let hits = 0;
       expandRow(tr).forEach((c, i) => {
-        const key = HMAP[cellText(c).toUpperCase()];
+        const key = keyOf(cellText(c).toUpperCase());
         if (!key) return;
         if (key === 'e' && map.e != null) { map.setE = i; return; }
         if (map[key] == null) { map[key] = i; hits++; }
@@ -1309,10 +2064,79 @@ function startReader(SPB) {
     const extra = ['sa', 'dig', 'bs', 'ba', 'a', 're'].filter((k) => map[k] != null).length;
     return map.k != null && (map.ta != null || map.pct != null) && extra >= 2;
   }
-  const looksBasketball = (table) => /\bREB\b|\bFG\b|\b3PT\b|\bFGM\b/.test(cellText(table.rows[0] || table).toUpperCase());
   // Summary rows that sit in or beside a box score: team, totals, and team-by-set rows ("Set 1", "Match").
   // Seen as player cards on the live page on 2026-10-17, so they are rejected by label as well as by table.
-  const NON_PLAYER = /^(sets?|game|match|totals?|team|tm|opp(onent)?s?)\b|^\d+(st|nd|rd|th)?(\s+sets?)?$/i;
+  const NON_PLAYER = /^(sets?|game|match|totals?|team|tm|opp(onent)?s?|bench|starters|reserves|technical|coach|dnp|did not play|1st half|2nd half|half|quarter|period|ot)\b|^\d+(st|nd|rd|th)?(\s+(sets?|half|quarter|qtr|period))?$/i;
+
+  // Basketball box columns. Written for both the StatCrew box (## Player FG-FGA 3FG-FGA FT-FTA OFF DEF TOT
+  // PF TP A TO BLK S MIN) and the shorter live layout (# PLAYER MIN FG 3PT FT ORB-DRB REB PF A TO BLK STL PTS).
+  // fg, tp, ft and od are "made-attempted" (or off-def) cells such as "5-11".
+  function bbKey(h) {
+    h = h.replace(/\s+/g, '').replace(/\.$/, '');
+    if (/^(#|##|NO|NUM)$/.test(h)) return 'uni';
+    if (/^(PLAYERS?|NAME|ATHLETE)$/.test(h)) return 'name';
+    if (/^(MIN|MINS|MP)$/.test(h)) return 'min';
+    if (/%|PCT/.test(h)) return null;
+    if (h === 'FGM') return 'fgm';
+    if (h === 'FGA') return 'fga';
+    if (/^(3PM|3FGM|3PTM)$/.test(h)) return 'tpm';
+    if (/^(3PA|3FGA|3PTA)$/.test(h)) return 'tpa';
+    if (h === 'FTM') return 'ftm';
+    if (h === 'FTA') return 'fta';
+    if (/^FG(M?[-\/](FG)?A)?$/.test(h)) return 'fg';
+    if (/^3-?(PT|FG|P)?(FG)?(M?[-\/](3P|3PT|FG)?A)?$/.test(h) || h === '3PTFG') return 'tp';
+    if (/^FT(M?[-\/](FT)?A)?$/.test(h)) return 'ft';
+    if (/^(OREB|OFF|OR|ORB)$/.test(h)) return 'oreb';
+    if (/^(DREB|DEF|DR|DRB)$/.test(h)) return 'dreb';
+    if (/^(REB|REBS|TOT|TR|TRB|RB)$/.test(h)) return 'reb';
+    if (/^(ORB|OR|OREB|OFF|O)[-\/](DRB|DR|DREB|DEF|D)$/.test(h)) return 'od';
+    if (/^(A|AST|AS|ASST)$/.test(h)) return 'ast';
+    if (/^(TO|TOV|TOS)$/.test(h)) return 'to';
+    if (/^(BLK|BLKS|BK|BL|BS)$/.test(h)) return 'blk';
+    if (/^(STL|STLS|ST)$/.test(h)) return 'stl';
+    if (/^(PF|F|FLS|FOULS)$/.test(h)) return 'pf';
+    if (/^(PTS|TP|POINTS)$/.test(h)) return 'pts';
+    if (/^(S|GS)$/.test(h)) return 'sflag';
+    return null;
+  }
+  // Each sport: how to read a header cell, whether a header row is that sport's player box, and how to
+  // turn a row's cells into a stat line.
+  const READ = {
+    vb: {
+      keyOf: (h) => HMAP[h],
+      looks: looksVolleyball,
+      stats(cells, map) {
+        const val = (k) => (map[k] == null || !cells[map[k]] ? 0 : parseFloat(cellText(cells[map[k]]).replace(/[^\d.-]/g, '')) || 0);
+        const stats = {};
+        for (const k of ['k', 'e', 'ta', 'a', 'sa', 'se', 're', 'dig', 'bs', 'ba', 'be']) stats[k] = val(k);
+        return stats;
+      },
+    },
+    bb: {
+      keyOf: bbKey,
+      looks: (map) => map.pts != null && (map.fg != null || map.fgm != null) && (map.reb != null || map.oreb != null || map.od != null || map.ast != null),
+      // Only the columns the table has are returned, so a short on-court table merged over the full box
+      // cannot zero a stat it does not list.
+      stats(cells, map) {
+        const txt = (k) => (map[k] == null || !cells[map[k]] ? '' : cellText(cells[map[k]]));
+        const n = (k) => parseFloat(txt(k).replace(/[^\d.]/g, '')) || 0;
+        const pair = (k) => { const m = txt(k).match(/(\d+)\s*[-\/]\s*(\d+)/); return m ? [+m[1], +m[2]] : null; };
+        const o = {};
+        for (const [k, m, a] of [['fg', 'fgm', 'fga'], ['tp', 'tpm', 'tpa'], ['ft', 'ftm', 'fta'], ['od', 'oreb', 'dreb']]) {
+          const pr = pair(k);
+          if (pr) { o[m] = pr[0]; o[a] = pr[1]; }
+          else if (map[k] != null && map[m] == null) o[m] = n(k);
+          if (map[m] != null) o[m] = n(m);
+          if (map[a] != null) o[a] = n(a);
+        }
+        for (const k of ['reb', 'ast', 'to', 'blk', 'stl', 'pf', 'pts']) if (map[k] != null) o[k] = n(k);
+        if (map.stl == null && map.sflag != null && /^\d+$/.test(txt('sflag'))) o.stl = +txt('sflag');
+        if (map.reb == null && (o.oreb != null || o.dreb != null)) o.reb = (o.oreb || 0) + (o.dreb || 0);
+        if (map.min != null) o.min = parseInt(txt('min'), 10) || 0;
+        return o;
+      },
+    },
+  };
 
   function splitName(raw) {
     let s = raw.replace(/\*/g, '').replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim().replace(/^\d+\s+/, '');
@@ -1347,17 +2171,18 @@ function startReader(SPB) {
   }
 
   const ignoredTables = [];
-  function readTables(title, names) {
+  function readTables(title, names, sport) {
+    const R = READ[sport];
     const found = [];
     ignoredTables.length = 0;
     for (const table of document.querySelectorAll('table')) {
       if (ours(table)) continue;
-      const hm = headerMap(table);
-      if (!hm || !looksVolleyball(hm.map)) continue;
+      const hm = headerMap(table, R.keyOf);
+      if (!hm || !R.looks(hm.map)) continue;
       const bits = contextBits(table);
       if (/season|career|cumulative/i.test(bits.slice(0, 2).join(' '))) continue;
-      // A player box has a jersey or a name column. Team-by-set and comparison tables have volleyball
-      // columns but neither, and their rows ("Set 1", "Match") would otherwise read as players.
+      // A player box has a jersey or a name column. Team-by-set, by-period and comparison tables have the
+      // stat columns but neither, and their rows ("Set 1", "Match", "1st Half") would otherwise read as players.
       if (hm.map.uni == null && hm.map.name == null) {
         if (ignoredTables.length < 4) ignoredTables.push({ headers: Object.keys(hm.map).join(' '), rows: table.rows.length, context: bits.join(' | ').slice(0, 100) });
         continue;
@@ -1367,10 +2192,8 @@ function startReader(SPB) {
       const rows = [...table.rows];
       for (const tr of rows.slice(rows.indexOf(hm.tr) + 1)) {
         const cells = expandRow(tr);
-        const val = (k) => (hm.map[k] == null || !cells[hm.map[k]] ? 0 : parseFloat(cellText(cells[hm.map[k]]).replace(/[^\d.-]/g, '')) || 0);
         const lead = cells.slice(0, 3).map(cellText).join(' ');
-        const stats = {};
-        for (const k of ['k', 'e', 'ta', 'a', 'sa', 'se', 're', 'dig', 'bs', 'ba', 'be']) stats[k] = val(k);
+        const stats = R.stats(cells, hm.map);
         if (/^\s*(team\s+)?totals?\b/i.test(lead) || /\btotals?\b/i.test(cells.slice(0, 2).map(cellText).join(' '))) { totals = stats; continue; }
         if (/^\s*(tm|team)\b/i.test(lead)) continue;
         const nameCell = hm.map.name != null ? cells[hm.map.name] : cells.find((x) => /[A-Za-z]{2}/.test(cellText(x)));
@@ -1433,8 +2256,8 @@ function startReader(SPB) {
 
   // ---------------------------------------------------------- play lines
 
-  const ACTION = /\b(kill|ace|block|dig|attack error|service error|serve|assist|point|wins|timeout|time-out|challenge|review|substitution|subs?:|card|penalty)\b/i;
-  const ALERT = /\b(time[- ]?out|challenge|video review|red card|yellow card|penalty|sanction)\b/i;
+  const ACTION = /\b(kill|ace|block|dig|attack error|service error|serve|assist|point|wins|timeout|time-out|challenge|review|substitution|subs?:|card|penalty|good!?|made|makes|miss(ed|es)?|rebound|steal|turnover|turnovr|foul|dunk|lay-?up|jumper|jump shot|3[- ]?pt(r|\.)?|three|free throw|ft shot)\b/i;
+  const ALERT = /\b(time[- ]?out|challenge|video review|red card|yellow card|penalty|sanction|technical|flagrant)\b/i;
   const seen = new Set();
   const statTables = new WeakSet();
   const lineLog = [];
@@ -1487,38 +2310,110 @@ function startReader(SPB) {
 
   let trackedSets = { vis: 0, home: 0 }, lastTitle = null;
   const diag = { version: VERSION, eventId, notes: [] };
+  // Basketball: 2 halves or 4 quarters, remembered once the page gives it away.
+  let bbPeriods = 0;
+
+  // A line score: a small table whose header counts periods (1 2, or 1 2 3 4) above one row per team.
+  // Returns how many periods it lists, or 0.
+  function lineScorePeriods(title) {
+    for (const table of document.querySelectorAll('table')) {
+      if (ours(table) || statTables.has(table) || table.rows.length < 3 || table.rows.length > 4) continue;
+      const head = expandRow(table.rows[0]).map(cellText);
+      const nums = head.filter((h) => /^[1-4]$/.test(h));
+      if (nums.length < 2 || head.includes('5') || nums.join('') !== '1234'.slice(0, nums.length)) continue;
+      const body = [...table.rows].slice(1, 3).map((tr) => cellText(expandRow(tr)[0] || tr));
+      const is = (code, text) => !!code && mentions(text, code);
+      if (body.length === 2 && (is(title.home.code, body[0]) || is(title.home.code, body[1])) && (is(title.vis.code, body[0]) || is(title.vis.code, body[1]))) return nums.length;
+    }
+    return 0;
+  }
+
+  // What every table on the page is headed, for Reader check's Copy for Claude: it is how the reader gets
+  // fitted to a layout it has not met. Refreshed every few seconds, not on every change.
+  let pageTables = [], pageTablesAt = 0;
+  function describeTables() {
+    if (Date.now() - pageTablesAt < 5000) return pageTables;
+    pageTablesAt = Date.now();
+    pageTables = [];
+    for (const table of document.querySelectorAll('table')) {
+      if (ours(table) || !table.rows.length) continue;
+      if (pageTables.length >= 14) break;
+      pageTables.push({ head: expandRow(table.rows[0]).map(cellText).join(' | ').slice(0, 140),
+        row2: table.rows[1] ? expandRow(table.rows[1]).map(cellText).join(' | ').slice(0, 140) : '', rows: table.rows.length, id: table.id || '', cls: String(table.className || '').slice(0, 40) });
+    }
+    return pageTables;
+  }
 
   function snapshotFromPage() {
-    const title = parseTitle(document.title);
+    let title = parseTitle(document.title);
     const names = teamNames();
-    const tables = readTables(title, names);
+    const bothSides = (ts) => ts.some((t) => t.side === 'vis') && ts.some((t) => t.side === 'home');
+    // The sport is whichever box score the page shows: volleyball columns or basketball columns.
+    let sport = 'vb';
+    let tables = readTables(title, names, 'vb');
+    if (!tables.length) {
+      const bbt = readTables(title, names, 'bb');
+      if (bbt.length) { tables = bbt; sport = 'bb'; }
+    }
     tables.forEach((t) => statTables.add(t.table));
     diag.title = document.title;
     diag.parsedTitle = title;
     diag.paused = titlePaused(document.title);
     diag.names = names;
+    diag.sport = tables.length ? sport : null;
     diag.tables = tables.map((t) => ({ side: t.side, players: t.players.length, totals: !!t.totals, headers: t.headers.join(' '), skipped: t.skipped, context: t.ctx }));
     diag.ignoredTables = ignoredTables.slice();
+    diag.pageTables = describeTables();
+    // Basketball safety net: if the tab title is not in the form this reader knows, take the score from
+    // the box score itself (each team's points) and the names from the page heading. The period and clock
+    // are then unknown, and the engine estimates how far along the game is from the score.
+    if (!title && sport === 'bb' && bothSides(tables)) {
+      const pts = (side) => {
+        const ts = tables.filter((t) => t.side === side);
+        const tot = ts.map((t) => t.totals && t.totals.pts).find((v) => v != null);
+        return tot != null ? tot : Math.max(0, ...ts.map((t) => t.players.reduce((a, p) => a + (p.pts || 0), 0)));
+      };
+      const code = (name, d) => (name ? String(name).trim().slice(0, 12) : d);
+      title = { vis: { code: code(names.vis, 'AWAY'), score: pts('vis') }, home: { code: code(names.home, 'HOME'), score: pts('home') },
+        final: false, set: null, raw: '', paused: false, fromBox: true };
+      diag.parsedTitle = title;
+    }
     if (!title) return { error: 'Waiting for the score in the tab title (accept the terms on the stats page if you haven’t).' };
-    if (!tables.some((t) => t.side === 'vis') || !tables.some((t) => t.side === 'home')) {
-      const bb = [...document.querySelectorAll('table')].some(looksBasketball);
-      return { error: bb ? 'This looks like a basketball page. Basketball support comes next.'
-        : 'Waiting for both teams’ box-score tables. Switch the stats page to its box score view.' };
+    if (!bothSides(tables)) {
+      return { error: 'Waiting for both teams’ box-score tables. Switch the stats page to its box score view.' };
+    }
+    const mergeSide = (side) => {
+      const map = new Map(); let totals = null;
+      for (const t of tables.filter((x) => x.side === side)) {
+        for (const p of t.players) map.set(p.uni, { ...(map.get(p.uni) || {}), ...p });
+        if (t.totals) totals = { ...(totals || {}), ...t.totals };
+      }
+      return { code: title[side].code, name: (side === 'home' ? names.home : names.vis) || title[side].code, players: [...map.values()], totals };
+    };
+    rosterWords = tables.flatMap((t) => t.players.map((p) => p.last.toLowerCase())).filter((w) => w.length > 2);
+    if (sport === 'bb') {
+      const st = parseBBStatus(title.raw);
+      if (st.periods) bbPeriods = st.periods;
+      else if (!bbPeriods) { const n = lineScorePeriods(title); bbPeriods = n === 2 || n === 4 ? n : 0; }
+      const P = bbPeriods || 2;
+      let period = st.ot ? P + st.ot : st.period;
+      if (st.halftime) period = P / 2;
+      const teams = { home: mergeSide('home'), away: mergeSide('vis') };
+      const any = [teams.home, teams.away].some((t) => t.players.some((p) => (p.pts || 0) + (p.fga || 0) + (p.reb || 0) + (p.pf || 0) + (p.min || 0) > 0));
+      const pre = !st.final && title.home.score + title.vis.score === 0 && !any;
+      diag.status = { ...st, periods: bbPeriods };
+      return {
+        sport: 'bb', status: st.final ? 'final' : pre ? 'pre' : 'live', period: period || 0, periods: bbPeriods, clock: st.clock,
+        intermission: !st.final && st.intermission, rawStatus: title.raw, set: period || 0,
+        score: { home: title.home.score, away: title.vis.score }, setsWon: { home: 0, away: 0 }, teams,
+      };
     }
     if (lastTitle && title.set && lastTitle.set && title.set > lastTitle.set) {
       trackedSets[lastTitle.home.score > lastTitle.vis.score ? 'home' : 'vis'] += 1;
     }
     lastTitle = title;
     const sw = readSetsWon(title) || trackedSets;
-    const merge = (side) => {
-      const map = new Map(); let totals = null;
-      for (const t of tables.filter((x) => x.side === side)) {
-        for (const p of t.players) map.set(p.uni, { ...(map.get(p.uni) || {}), ...p });
-        if (t.totals) totals = t.totals;
-      }
-      return { code: title[side].code, name: (side === 'home' ? names.home : names.vis) || title[side].code, players: [...map.values()], totals };
-    };
-    rosterWords = tables.flatMap((t) => t.players.map((p) => p.last.toLowerCase())).filter((w) => w.length > 2);
+    const merge = mergeSide;
     return {
       sport: 'vb', status: title.final ? 'final' : (title.set || 0) === 0 ? 'pre' : 'live', set: title.set || 1,
       score: { home: title.home.score, away: title.vis.score },
@@ -1602,9 +2497,10 @@ function startReader(SPB) {
     applyLayout();
   }
   // The overlay's own copy of the board settings (this tab's storage, so they are separate from the board window's).
-  let ctl = null, lastRotateAt = Date.now();
+  let ctl = null, lastRotateAt = Date.now(), lastClock;
   function applyLayout() {
     if (!ctl) return;
+    if (state.raw) ctl.setSport(state.raw.sport);
     eng.setCards(ctl.settings.layout === '5' ? 5 : 3);
     board.setLayout(ctl.settings.layout === 'all' ? 'list' : 'cards', ctl.settings.listStats);
   }
@@ -1696,7 +2592,8 @@ function startReader(SPB) {
   }
   function diagSummary() {
     return { version: VERSION, eventId, url: location.href.split('#')[0], title: diag.title, parsedTitle: diag.parsedTitle,
-      names: diag.names, tables: diag.tables, ignoredTables: diag.ignoredTables, error: state.error, linesCaptured: lineSeq, paused: !!diag.paused };
+      names: diag.names, sport: diag.sport, status: diag.status, tables: diag.tables, ignoredTables: diag.ignoredTables, pageTables: diag.pageTables,
+      error: state.error, linesCaptured: lineSeq, paused: !!diag.paused };
   }
   function send(force) {
     const t = target();
@@ -1739,15 +2636,21 @@ function startReader(SPB) {
       if (!autoOpened) { autoOpened = true; if (store.get('mode') === 'here') setOpen(true); }
       const fresh = lineLog.filter((l) => l.id > engLineId);
       engLineId = lineSeq;
-      const hash = JSON.stringify([snap.set, snap.score, snap.setsWon, snap.teams.home.players, snap.teams.away.players]);
+      const hash = JSON.stringify([snap.sport, snap.status, snap.set, snap.intermission, snap.score, snap.setsWon, snap.teams.home.players, snap.teams.away.players]);
       if (force || hash !== lastHash || fresh.length) {
         lastHash = hash; lastChange = Date.now();
-        inTabView = eng.update(PE.swapSides(snap, swapped), fresh.map((l) => l.text).slice(-3));
+        if (ctl && ctl.setSport(snap.sport)) applyLayout();
+        inTabView = eng.update(PE.swapSides(snap, swapped), fresh.map((l) => l.text).slice(snap.sport === 'bb' ? -6 : -3));
         if (overlayOpen()) { applyColors(); board.render(inTabView); }
+      } else if (snap.clock !== lastClock) {
+        // Only the game clock moved: refresh the game panel, leave the cards alone.
+        inTabView = eng.update(PE.swapSides(snap, swapped), []);
+        if (overlayOpen()) board.renderGame(inTabView);
       } else if (eng.expireHolds()) {
         inTabView = eng.view();
         if (overlayOpen()) board.render(inTabView);
       }
+      lastClock = snap.clock;
       if (overlayOpen()) {
         const age = Math.round((Date.now() - lastChange) / 1000);
         shadow.getElementById('status').textContent = (diag.paused ? 'StatBroadcast paused · click its page to resume' : 'Reading this page') + ` · last change ${age}s ago`;

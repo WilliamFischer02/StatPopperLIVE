@@ -234,6 +234,15 @@ The paste-a-link flow gives the same experience, and the data never leaves Willi
 - **Polish (two review agents).** Taken: glyph mode chips (○ ◐ ● ‖ ▲), green Live (red reserved for act-now), quieter card buttons with Hide dimmer, "● Pinned" on the button with minutes left in the tooltip, value-tick flash, alert pulse, freshness tint, sets-won label, shorter status/notice/dock/picker copy, "Change page", picker below the board. Taken in v0.4.1 (William said there was time): overlay controls, a Pass undo chip, click-to-copy a pop line. Not taken: a full-width crit alert band, hiding setup buttons while live.
 - **Deploy.** Pushed to `main` within 2 hours of the broadcast because William asked for it to be ready for the 4 pm match; v0.3.5 (`dpl_CfWWf8F8ZVV6cXacwjR16zcYVuxf`) is the rollback.
 
+**D16. v0.5.0: basketball and sport detection (Nov 15, the morning of William's first basketball broadcast).** His ask: "visually similar but adapted to the speed / cadence of basketball and relevant plays and stat types", and "detect what type of game is being played". How it was read and built:
+- **Same board, sport-specific rules.** The 2x2 layout, cards, Pin/Pass/Hide, stars, layouts and rotate are unchanged. The engine was split so those rules are shared and a sport object supplies the stat line, notability, pops, team lines, alerts and play parsing. Volleyball's replay output was diffed before and after: identical.
+- **Detection** is by the box score's columns (a K/TA box is volleyball; a PTS/FG/REB box is basketball), not by URL or title, because the title format for basketball was unknown. Rejected: a manual sport switch (he asked for detection, and a wrong setting on game day is one more thing to notice).
+- **Cadence.** A "play" is any update where the score or a stat changed; a volleyball rally is roughly three of them, so the windows were scaled (Pass 25, protection 8). The ticking clock is deliberately not a play. Runs are in points (6-0 and up), with a hot-hand tag for one player scoring 7+ straight team points.
+- **No real page seen.** StatBroadcast cannot be fetched (D2), so the reader was written to be lenient: two header layouts, made-attempted cells, many title wordings, score from the box if the title fails, game time from the score if there is no clock, and "just now" pins from box-score changes so the board does not depend on play-by-play wording. `diag.pageTables` was added to Copy for Claude for calibration.
+- **Not claimed.** Team fouls and the bonus only when the reader saw the period start. Team extras (paint, bench, off turnovers) are not read: their layout is unknown, and a wrong team number on air is worse than a missing one.
+- **Practice data is invented.** `src/bb-sim.js` generates a seeded game with made-up players; no real play-by-play was on hand. It is labelled as made-up on the page.
+- **Pop names** are a guess pending William's graphics buttons (§11).
+
 ## 6. Architecture quick reference
 
 The full version is in `CLAUDE.md`. Summary:
@@ -350,6 +359,7 @@ Play capture can only be tested during a live match.
 | Oct 17, about 11:30 pm | v0.3.5 local: mock with the live headers, TEAM row and team-by-set tables. Before the fix it reproduced the bug (cards "1", "2", "3", "Match"; dock 17 + 15 players). After the fix: 14 + 13 players; replay test and e2e (26 checks) | All passed |
 | Oct 17, about 11:45 pm | v0.3.5 preview (`dpl_8ijTV88YERFShgkXjRnNihrDjYXn`) e2e 26 checks; production (`dpl_CfWWf8F8ZVV6cXacwjR16zcYVuxf`, `main` `260f12c`): live files identical to the build, live e2e 27 checks | All passed |
 | Nov 7, 1:15–1:35 pm | v0.4.0 and v0.4.1 local: replay test (rotation, 5-card, summary rows, Pass/Undo) and e2e 38 checks; previews `dpl_F2m7M9E7thmuFTwCuKn5Fmgd8Bs8`, `dpl_5BFb7VJGfFbr3cBgJ7CEDkLfyTUb`, `dpl_HaVnJaxXpdSYHUDkRvWdETWz3WDd` live e2e | All passed |
+| Nov 15, morning | v0.5.0 local (Windows): volleyball replay output identical to v0.4.1; `node test/basketball.test.js` (halves and quarters); e2e 54 checks including basketball detection, both box layouts, switch back to volleyball, `/practice-bb`, the overlay and the title fallback | All passed |
 | Nov 7, 1:37 pm | Production `dpl_2J3rTAv2eZWg7Z7QRqyg3a1z9mZB` (`main` `7b2b18e`, PR #5 merged by William): 13 live files byte-identical to the build, live e2e 39 checks | All passed |
 
 ---

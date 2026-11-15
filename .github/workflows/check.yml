@@ -19,6 +19,8 @@ jobs:
         run: python3 tools/build_site.py --check
       - name: Engine replay
         run: node test/replay.test.js > /dev/null
+      - name: Basketball engine (made-up game)
+        run: node test/basketball.test.js > /dev/null
       - name: Install Playwright
         run: |
           pip install playwright==1.47.0

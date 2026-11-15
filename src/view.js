@@ -23,6 +23,18 @@
     { id: 'a', label: 'Assists', l: 'AST' }, { id: 'sa', label: 'Aces', l: 'ACE' }, { id: 'pts', label: 'Points', l: 'PTS' },
     { id: 'pct', label: 'Hit %', l: 'HIT' }, { id: 'ta', label: 'Attempts', l: 'TA' }, { id: 'e', label: 'Errors', l: 'E' },
   ];
+  const LIST_STATS_BB = [
+    { id: 'pts', label: 'Points', l: 'PTS' }, { id: 'reb', label: 'Rebounds', l: 'REB' }, { id: 'ast', label: 'Assists', l: 'AST' },
+    { id: 'stl', label: 'Steals', l: 'STL' }, { id: 'blk', label: 'Blocks', l: 'BLK' }, { id: 'fg', label: 'Field goals', l: 'FG' },
+    { id: 'tp', label: '3-pointers', l: '3PT' }, { id: 'ft', label: 'Free throws', l: 'FT' }, { id: 'pf', label: 'Fouls', l: 'PF' },
+    { id: 'to', label: 'Turnovers', l: 'TO' }, { id: 'min', label: 'Minutes', l: 'MIN' },
+  ];
+  // Per sport: the stats on offer, the two shown by default, and where the choice is saved.
+  const LIST = {
+    vb: { stats: LIST_STATS, def: ['k', 'dig'], key: 'liststats' },
+    bb: { stats: LIST_STATS_BB, def: ['pts', 'reb'], key: 'liststats:bb' },
+  };
+  const listFor = (sport) => LIST[sport] || LIST.vb;
 
   const ROTATE_OPTIONS = [[0, 'Off'], [15, '15 s'], [30, '30 s'], [45, '45 s'], [60, '1 min'], [90, '1½ min'], [120, '2 min'],
     [180, '3 min'], [240, '4 min'], [300, '5 min'], [420, '7 min'], [600, '10 min']];
@@ -32,11 +44,18 @@
   function mountControls(host, opts) {
     opts = opts || {};
     const get = (k, d) => (opts.get ? opts.get(k, d) : d), set = (k, v) => { if (opts.set) opts.set(k, v); };
-    const settings = { layout: String(get('layout', '3')), listStats: get('liststats', ['k', 'dig']), rotate: +get('rotate', 0) || 0 };
+    const settings = { sport: 'vb', layout: String(get('layout', '3')), listStats: null, rotate: +get('rotate', 0) || 0 };
     if (!['3', '5', 'all'].includes(settings.layout)) settings.layout = '3';
-    if (!Array.isArray(settings.listStats) || settings.listStats.length !== 2 || !settings.listStats.every((id) => LIST_STATS.some((x) => x.id === id))) settings.listStats = ['k', 'dig'];
+    // The list layout's two stats are remembered per sport.
+    function loadListStats() {
+      const L = listFor(settings.sport);
+      const v = get(L.key, L.def);
+      settings.listStats = Array.isArray(v) && v.length === 2 && v.every((id) => L.stats.some((x) => x.id === id)) ? v : L.def.slice();
+    }
+    loadListStats();
     if (!ROTATE_OPTIONS.some((o) => o[0] === settings.rotate)) settings.rotate = 0;
-    const statSel = (id, label) => `<select id="${id}" aria-label="${label}">${LIST_STATS.map((x) => `<option value="${x.id}">${esc(x.label)}</option>`).join('')}</select>`;
+    const statOpts = () => listFor(settings.sport).stats.map((x) => `<option value="${x.id}">${esc(x.label)}</option>`).join('');
+    const statSel = (id, label) => `<select id="${id}" aria-label="${label}">${statOpts()}</select>`;
     host.innerHTML = `
       <span class="ctl">Cards <span class="seg" id="layoutseg" role="group" aria-label="Player card layout"><button type="button" data-layout="3">3 per team</button><button type="button" data-layout="5">5 per team</button><button type="button" data-layout="all">All players</button></span></span>
       <span class="ctl" id="liststats">Show ${statSel('statA', 'First stat')} &amp; ${statSel('statB', 'Second stat')}</span>
@@ -54,12 +73,25 @@
       if (!b) return;
       settings.layout = b.dataset.layout; set('layout', settings.layout); changed('layout');
     });
-    const onStats = () => { settings.listStats = [$('#statA').value, $('#statB').value]; set('liststats', settings.listStats); changed('liststats'); };
+    const onStats = () => { settings.listStats = [$('#statA').value, $('#statB').value]; set(listFor(settings.sport).key, settings.listStats); changed('liststats'); };
     $('#statA').addEventListener('change', onStats);
     $('#statB').addEventListener('change', onStats);
     $('#rotate').addEventListener('change', () => { settings.rotate = +$('#rotate').value || 0; set('rotate', settings.rotate); changed('rotate'); });
     paint();
-    return { settings, setCountdown(text) { $('#rotatecount').textContent = text || ''; } };
+    return {
+      settings,
+      setCountdown(text) { $('#rotatecount').textContent = text || ''; },
+      // Switch the stat choices to another sport's. Returns true when the sport changed.
+      setSport(sport) {
+        sport = LIST[sport] ? sport : 'vb';
+        if (sport === settings.sport) return false;
+        settings.sport = sport;
+        loadListStats();
+        $('#statA').innerHTML = statOpts(); $('#statB').innerHTML = statOpts();
+        paint();
+        return true;
+      },
+    };
   }
 
   // Copy a line to the clipboard: the async API first, a hidden textarea when that is blocked.
@@ -156,6 +188,7 @@
     const popLine = (c, p) => `${String(c.last).toUpperCase()} · ${p.name} · ${p.parts.map((x) => x.v + ' ' + x.l).join(' · ')}`;
     const isCopied = (text) => copied.text === text && Date.now() < copied.until;
 
+    let passText = 'Skip this player for the next 10 rallies';
     function playerCard(c, vals) {
       const live = c.tag && c.tag.kind === 'live';
       const tag = c.tag ? (live ? `<span class="livedot">${esc(c.tag.text)}</span>` : `<span class="tag-serve">${esc(c.tag.text)}</span>`) : '';
@@ -175,7 +208,7 @@
           <div class="jersey" aria-label="Number ${esc(c.uni)}">${esc(c.uni)}</div>
           <div class="who"><div class="last">${esc(c.last)}</div><div class="meta">${tag}${reason}<span>${esc(c.first)}</span></div></div>
           <div class="acts">${pinBtn}${starBtn}
-            <button class="abtn" data-act="pass" data-key="${esc(c.key)}" title="Skip this player for the next 10 rallies">Pass</button>
+            <button class="abtn" data-act="pass" data-key="${esc(c.key)}" title="${esc(passText)}">Pass</button>
             <button class="abtn hide" data-act="hide" data-key="${esc(c.key)}" title="Hide this player for the rest of the match">Hide</button>
           </div>
         </div>
@@ -185,7 +218,8 @@
 
     // List layout: every player on the side, two chosen stats, the carded players highlighted on top.
     function playerList(v, side, vals) {
-      const cols = listStats.map((id) => LIST_STATS.find((x) => x.id === id) || LIST_STATS[0]);
+      const defs = listFor(v.sport).stats;
+      const cols = listStats.map((id, i) => defs.find((x) => x.id === id) || defs[i]);
       const rows = v.players[side].map((r) => {
         const cells = cols.map((c) => {
           const id = r.key + '|list|' + c.id, val = r.stats[c.id];
@@ -239,8 +273,16 @@
         <div class="grid"><div class="net" aria-hidden="true"></div>${cell(4)}${cell(3)}${cell(2)}${cell(5)}${cell(6)}${cell(1)}</div></div>`;
     }
 
+    // Basketball's second tab: each team's leaders in points, rebounds and assists.
+    function leadersPanel(v) {
+      const col = (side) => `<div class="court"><h4>${swatch(side, v.teams[side].code)}${esc(v.teams[side].code)}</h4>
+        <ul class="leaders">${(v.leaders[side] || []).map((x) => `<li><span class="lv">${esc(x.v)}</span><span class="ll">${esc(x.l)}</span><span class="ln">${x.last ? '#' + esc(x.uni) + ' ' + esc(x.last) : '—'}</span></li>`).join('')}</ul></div>`;
+      return `<div class="courts">${col('home')}${col('away')}</div>`;
+    }
+
     function drawGame(v) {
       lastView = v;
+      const bb = v.sport === 'bb';
       const sv = v.serving;
       const serveLine = sv ? `<span class="ball" style="background:var(--${sv.side})"></span>${esc(v.teams[sv.side].code)} serving${sv.last ? ` · <b>#${esc(sv.uni)} ${esc(sv.last)}</b>${sv.predicted ? ' · next' : ''}` : ''}${sv.streak >= 2 ? ` · ${sv.streak} straight` : ''}` : '';
       // An alert that just appeared (or changed) pulses once, so it registers while the eye is on the cards.
@@ -253,26 +295,39 @@
       const sc = (p) => (p.score ? `${p.score.home}–${p.score.away}` : '');
       const playsPanel = `<p class="lastplay">${lastPlay ? esc(lastPlay.text) : 'No plays yet.'}</p>
         <ul class="recent">${plays.filter((p) => p !== lastPlay).slice(0, 3).map((p) => `<li class="${p.alert ? 'is-alert' : ''}"><span class="sc">${sc(p)}</span><span>${esc(p.text)}</span></li>`).join('')}</ul>`;
-      const rotPanel = `<div class="courts">${court(v, 'home')}${court(v, 'away')}</div>
+      const rotPanel = bb ? '' : `<div class="courts">${court(v, 'home')}${court(v, 'away')}</div>
         <p class="note">From the serve order. Liberos not tracked.</p>`;
-      const status = v.status === 'final' ? 'Final' : v.status === 'pre' ? 'Pregame' : `Set ${v.set}`;
+      let status = v.status === 'final' ? 'Final' : v.status === 'pre' ? 'Pregame' : `Set ${v.set}`;
+      // Beside each team code: sets won (volleyball) or team fouls (basketball; amber once the other team is in the bonus).
+      let box = (side) => `<span class="sl-sets" title="Sets won">${v.setsWon[side]}<small>sets</small></span>`;
+      let infoLine = serveLine;
+      if (bb) {
+        status = esc(v.period.label) + (v.period.clock ? ` · <span class="sl-clock">${esc(v.period.clock)}</span>` : '');
+        box = (side) => {
+          const f = v.fouls[side];
+          const tip = f.exact ? `Team fouls this ${v.period.word}${f.bonus ? ' · ' + v.teams[side === 'home' ? 'away' : 'home'].code + ' in the ' + f.bonus.toLowerCase() : ''}` : 'Team fouls, whole game (the reader started partway through)';
+          return `<span class="sl-sets${f.bonus ? ' bonus' : ''}" title="${esc(tip)}">${f.n}<small>${f.exact ? 'fouls' : 'pf'}</small></span>`;
+        };
+        infoLine = esc(v.info || '');
+      }
       regions.game.innerHTML = `<div class="eyebrow">Game</div>
         <div class="scoreline">
-          <div class="sl-team home"><span class="sl-code">${esc(v.teams.home.code)}</span><span class="sl-sets" title="Sets won">${v.setsWon.home}<small>sets</small></span></div>
+          <div class="sl-team home"><span class="sl-code">${esc(v.teams.home.code)}</span>${box('home')}</div>
           <div class="sl-pts">${v.score.home}–${v.score.away}<small>${status}</small></div>
-          <div class="sl-team away"><span class="sl-sets" title="Sets won">${v.setsWon.away}<small>sets</small></span><span class="sl-code">${esc(v.teams.away.code)}</span></div>
+          <div class="sl-team away">${box('away')}<span class="sl-code">${esc(v.teams.away.code)}</span></div>
         </div>
-        <div class="serve">${serveLine}</div>
+        <div class="serve">${infoLine}</div>
         ${alerts ? `<div class="alerts">${alerts}</div>` : ''}
         <div class="tabs" role="tablist">
           <button class="tab" role="tab" data-act="tab" data-tab="plays" aria-selected="${tab === 'plays'}">Last play</button>
-          <button class="tab" role="tab" data-act="tab" data-tab="rot" aria-selected="${tab === 'rot'}">Rotation</button>
+          <button class="tab" role="tab" data-act="tab" data-tab="rot" aria-selected="${tab === 'rot'}">${bb ? 'Leaders' : 'Rotation'}</button>
         </div>
-        ${tab === 'plays' ? playsPanel : rotPanel}`;
+        ${tab === 'plays' ? playsPanel : bb ? leadersPanel(v) : rotPanel}`;
     }
 
     function drawFoot(v) {
-      const passed = (v.passed || []).map((h) => `<span class="chip passed" title="Back in ${h.rallies} ${h.rallies === 1 ? 'rally' : 'rallies'}">#${esc(h.uni)} ${esc(h.last)}<button data-act="unpass" data-key="${esc(h.key)}">Undo</button></span>`).join('');
+      const unit = v.unit || ['rally', 'rallies'];
+      const passed = (v.passed || []).map((h) => `<span class="chip passed" title="Back in ${h.rallies} ${h.rallies === 1 ? unit[0] : unit[1]}">#${esc(h.uni)} ${esc(h.last)}<button data-act="unpass" data-key="${esc(h.key)}">Undo</button></span>`).join('');
       const chips = v.hidden.map((h) => `<span class="chip">#${esc(h.uni)} ${esc(h.last)}<button data-act="unhide" data-key="${esc(h.key)}">Show</button></span>`).join('');
       regions.foot.innerHTML = (passed ? `<span>Passed:</span>${passed}` : '') + (chips ? `<span>Hidden:</span>${chips}` : '') + (handlers.footNote ? `<span>${handlers.footNote}</span>` : '');
     }
@@ -281,11 +336,15 @@
       render(v) {
         if (!v) return;
         const vals = new Map();
+        passText = v.passText || passText;
+        boardEl.classList.toggle('sport-bb', v.sport === 'bb');
         boardEl.classList.toggle('cards-5', layout !== 'list' && !!v.layout && v.layout.cards === 5);
         boardEl.classList.toggle('layout-list', layout === 'list');
         drawGame(v); drawTeam(v); drawPlayers(v, 'home', vals); drawPlayers(v, 'away', vals); drawFoot(v);
         lastVals = vals;
       },
+      // Redraw only the game panel (the basketball clock ticks every second; the cards stay put).
+      renderGame(v) { if (v) drawGame(v); },
       setColors,
       // layout: 'cards' or 'list'. stats: the two list-layout stat ids (see LIST_STATS).
       setLayout(l, stats) {
@@ -297,5 +356,5 @@
     };
   }
 
-  root.BoardView = { mountBoard, mountControls, copyText, esc, LIST_STATS, ROTATE_OPTIONS };
+  root.BoardView = { mountBoard, mountControls, copyText, esc, LIST_STATS, LIST_STATS_BB, ROTATE_OPTIONS };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

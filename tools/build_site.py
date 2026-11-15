@@ -21,7 +21,7 @@ args = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 args.add_argument("--check", action="store_true", help="build to a temp folder and compare with site/")
 args = args.parse_args()
 OUT = Path(tempfile.mkdtemp(prefix="spb-site-")) if args.check else SITE
-VERSION = "0.4.1"
+VERSION = "0.5.1"
 # Where the live site is served. The reader falls back to this when nothing else tells it where the board is
 # (Tampermonkey's @require gives it no script URL), and the one-click Tampermonkey script points here.
 PROD_ORIGIN = "https://stat-pop-board.vercel.app"
@@ -59,6 +59,7 @@ SPB.origin = window.__spbOrigin || (cs && cs.src ? new URL(cs.src, location.href
 SPB.cssHref = SPB.origin ? SPB.origin + '/assets/board.css?v={VERSION}' : null;
 SPB.fontsHref = {json.dumps(FONTS)};
 SPB.rosters = {{ msuVolleyball: {json.dumps(roster, separators=(",", ":"))} }};
+{private("basketball.js")}
 {private("engine.js")}
 {private("view.js")}
 {private("picker.js")}
@@ -75,7 +76,8 @@ box_js = "{\n" + ",\n".join(f'"{t}":[\n' + ",\n".join(json.dumps(r, separators=(
 replay_src_js = ("window.REPLAY_DATA=ReplayParse.build({\nmatch:" + json.dumps(src["match"], separators=(",", ":"))
                  + ",\nbox:" + box_js + ",\npbp:`" + src["pbp"] + "`});\n")
 write(OUT / "assets" / "replay.js", read("replay.js") + "\n" + read("replay-parse.js") + "\n" + replay_src_js)
-for src, dst in [("app-live.js", "live.js"), ("app-replay.js", "replay-app.js"), ("app-practice.js", "practice.js"), ("app-setup.js", "setup.js")]:
+for src, dst in [("app-live.js", "live.js"), ("app-replay.js", "replay-app.js"), ("app-practice.js", "practice.js"), ("app-setup.js", "setup.js"),
+                 ("bb-sim.js", "bb-sim.js"), ("app-practice-bb.js", "practice-bb.js")]:
     write(OUT / "assets" / dst, read(src))
 
 # Tampermonkey script. The reader comes in through @require, which Tampermonkey downloads itself, so a stats page
@@ -145,7 +147,7 @@ write(OUT / "index.html", head("Stat Pop Board", "Second-monitor board that pull
   <div id="ctlbar" class="ctlbar" aria-label="Board controls" hidden></div>
   <section id="start" class="start" aria-label="Link a stats page">
     <h1>Link a stats page</h1>
-    <p class="lead">Paste the game&rsquo;s StatBroadcast link, or just its event number. This board opens the stats page in a new tab and fills in once that page shows the box score.</p>
+    <p class="lead">Paste the game&rsquo;s StatBroadcast link, or just its event number. This board opens the stats page in a new tab and fills in once that page shows the box score. Volleyball or basketball: the board tells which from the page.</p>
     <form id="feedform" class="feed" autocomplete="off">
       <label for="feed">StatBroadcast link or event ID</label>
       <div class="feedrow"><input id="feed" type="text" inputmode="url" spellcheck="false" placeholder="https://stats.statbroadcast.com/broadcast/?id=670274"><button class="tbtn primary" type="submit">Open stats page</button></div>
@@ -157,7 +159,7 @@ write(OUT / "index.html", head("Stat Pop Board", "Second-monitor board that pull
       <li><b>Put the windows side by side</b>: stats page on one monitor, this board on the other.</li>
     </ol>
     <div class="recentlinks" id="recentlinks"></div>
-    <p class="morelinks"><a href="/setup">Set up the reader</a><button class="linkbtn" id="practice" type="button">Try the practice page</button><a href="/replay">Replay demo</a></p>
+    <p class="morelinks"><a href="/setup">Set up the reader</a><button class="linkbtn" id="practice" type="button">Try the practice page</button><button class="linkbtn" id="practicebb" type="button">Try basketball practice</button><a href="/replay">Replay demo</a></p>
   </section>
   <div id="board" hidden></div>
   <section id="picker" aria-label="Impact players" hidden></section>
@@ -230,13 +232,14 @@ write(OUT / "setup.html", head("Pop Board Setup", "How to start the Stat Pop Boa
   <section class="opt">
     <h2>Test it before a match</h2>
     <ol>
-      <li>Open the <a href="/">board</a> and click <b>Try the practice page</b>. It opens a stand-in stats page that replays MSU vs Idaho; the reader starts there by itself.</li>
+      <li>Open the <a href="/">board</a> and click <b>Try the practice page</b> (volleyball: it replays MSU vs Idaho) or <b>Try basketball practice</b> (a made-up game). Each opens a stand-in stats page; the reader starts there by itself.</li>
       <li>To test your bookmark: open the <a href="/practice?manual=1">practice page in manual mode</a>, click your <b>Pop board</b> bookmark, then click <b>Open board</b> in the bar that appears.</li>
       <li>To test on the real StatBroadcast site before game time: paste the stats link of any <b>finished</b> match into the board, start the reader there, and open <b>Reader check</b>. If it says <b>Reading OK</b> and lists both teams&rsquo; players, you&rsquo;re set. If not, click <b>Copy for Claude</b> and send it.</li>
     </ol>
     <p class="small">The practice page&rsquo;s layout is a guess at StatBroadcast&rsquo;s, so it tests your setup, not the real page. On game day, <b>Reader check</b> on the board shows exactly what was read from the real page.</p>
   </section>
 
+  <p class="small"><b>Volleyball or basketball?</b> Nothing to choose. The reader looks at the box score&rsquo;s columns and the board switches by itself. Reader check shows which sport it found.</p>
   <p class="small">What it reads: the score in the stats tab&rsquo;s title, the box-score tables, and new play-by-play lines. It sends them only to the board window on this computer. Nothing goes to a server; your impact-player picks and hidden players are saved in this browser.</p>
 </main>
 <script src="/assets/setup.js?v={VERSION}"></script>
@@ -320,6 +323,58 @@ write(OUT / "practice.html", head("UI 0, MSU 0 - SET 1", "Practice stand-in for 
 </div>
 <script src="/assets/replay.js?v={VERSION}"></script>
 <script src="/assets/practice.js?v={VERSION}"></script>
+<script>
+  // The reader starts by itself here, as if it were installed. ?manual=1 leaves it to your bookmark.
+  if (new URLSearchParams(location.search).get('manual') !== '1') {{
+    var s = document.createElement('script'); s.src = '/spb.js?v={VERSION}'; document.body.appendChild(s);
+  }}
+</script>
+</body>
+</html>
+""")
+
+write(OUT / "practice-bb.html", head("RDG 0, MSU 0 - Pregame", "Basketball practice stand-in for a StatBroadcast page.", board_css=False) + f"""
+<style>
+  body {{ margin: 0; background: #f4f5f7; color: #111; font: 13px/1.35 Arial, Helvetica, sans-serif; }}
+  .banner {{ background: #10161c; color: #edf1f4; padding: 10px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font: 500 14px/1.3 system-ui, "Segoe UI", sans-serif; }}
+  .banner b {{ font-weight: 700; }}
+  .banner button, .banner select {{ font: 600 13px system-ui, sans-serif; border-radius: 6px; border: 1px solid #3a4652; background: #1c242c; color: #edf1f4; padding: 5px 10px; cursor: pointer; }}
+  .banner a {{ color: #6fb4ff; }}
+  .banner .where {{ font-family: ui-monospace, Menlo, Consolas, monospace; color: #a5b1bc; }}
+  .wrap {{ max-width: 1100px; margin: 0 auto; padding: 12px 16px 80px; display: grid; gap: 10px; }}
+  h4 {{ margin: 4px 0 0; font-size: 18px; }}
+  h5 {{ margin: 8px 0 2px; font-size: 14px; }}
+  #console {{ border: 1px solid #b9bec6; background: #fff; padding: 6px 8px; font-weight: 700; }}
+  .tables {{ overflow-x: auto; }}
+  table {{ border-collapse: collapse; background: #fff; }}
+  th, td {{ border: 1px solid #c9ced6; padding: 2px 6px; text-align: right; }}
+  th {{ background: #e6e9ee; }}
+  td:nth-child(2), th:nth-child(2) {{ text-align: left; }}
+  tr.tot td {{ font-weight: 700; background: #f0f2f5; }}
+  #pbp {{ margin: 0; padding-left: 18px; color: #333; }}
+</style>
+</head>
+<body>
+<div class="banner" role="region" aria-label="Practice controls">
+  <span><b>Basketball practice</b> &middot; a stand-in stats page playing a made-up game (invented players) so you can test the reader and board.</span>
+  <button id="play" type="button">Pause</button>
+  <button id="fwd" type="button">Next play</button>
+  <select id="speed" aria-label="Speed"><option value="1500">1 play / 1.5 s</option><option value="3000" selected>1 play / 3 s</option><option value="6000">1 play / 6 s</option></select>
+  <button id="restart" type="button">Restart</button>
+  <button id="tip" type="button">From tip-off</button>
+  <span class="where" id="where"></span>
+  <a href="/">Board</a>
+</div>
+<div class="wrap">
+  <h4>Ridgeline at Montana St.</h4>
+  <div id="console">Waiting</div>
+  <table id="line"><tr></tr><tr></tr><tr></tr></table>
+  <div class="tables"><h5>Ridgeline</h5><table id="t-away"></table></div>
+  <div class="tables"><h5>Montana St.</h5><table id="t-home"></table></div>
+  <div><h5>Recent plays</h5><ol id="pbp" reversed></ol></div>
+</div>
+<script src="/assets/bb-sim.js?v={VERSION}"></script>
+<script src="/assets/practice-bb.js?v={VERSION}"></script>
 <script>
   // The reader starts by itself here, as if it were installed. ?manual=1 leaves it to your bookmark.
   if (new URLSearchParams(location.search).get('manual') !== '1') {{
