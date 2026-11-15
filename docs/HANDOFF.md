@@ -64,7 +64,7 @@
 
 ## Deployment notes
 
-- **Current production deployment:** `dpl_2J3rTAv2eZWg7Z7QRqyg3a1z9mZB` (v0.4.1, built from `main` at `7b2b18e`, PR #5), aliased to `stat-pop-board.vercel.app`. Deployed 1:37 pm MT Nov 7, after William merged the PR himself; all 13 live files byte-identical to the build; live e2e 39/39. Previous: `dpl_CfWWf8F8ZVV6cXacwjR16zcYVuxf` (v0.3.5, the Oct 17 match build), the one-click rollback candidate.
+- **Current production deployment:** `dpl_HVTFx7jPqP8YerbNLPkLxzLQTFRy` (v0.5.1, built from `main` at `579ca4a`, PR #6), aliased to `stat-pop-board.vercel.app`. Deployed Nov 15 after William merged the PR himself; live e2e all passed. Previous: `dpl_2J3rTAv2eZWg7Z7QRqyg3a1z9mZB` (v0.4.1, volleyball only), the one-click rollback candidate.
 - **How deploys work now:** push a branch, then create the deployment through the Vercel API with `gitSource` (see `CLAUDE.md` → Deploying). Preview deployments add Vercel's toolbar script to `index.html`, so only that file differs from the build there.
 - **Push-to-deploy is not on yet.** The Vercel project isn't linked to this repo; William needs to connect it in the project's Git settings. Check with him before assuming a push went live, and verify with the live e2e test.
 - **How it was deployed.** This first deploy went through the Vercel API with `spb.js` uploaded in three parts (`parts/spb-1..3.js`), which a one-off build command joined together. As a result, the project's saved settings still contain that build command and a `dist` output directory. The repo's `vercel.json` overrides both: no install, no build, output `site`. You can clear the overrides in the Vercel project settings once Git is connected, but they're harmless.
