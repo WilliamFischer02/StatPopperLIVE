@@ -72,3 +72,67 @@ window.showRally(0);
 </script></body></html>"""
 (ROOT / "test" / "mock-statbroadcast.html").write_text(page, encoding="utf-8", newline="\n")
 print("wrote test/mock-statbroadcast.html")
+
+# ---------------------------------------------------------------- basketball
+# A made-up game (src/bb-sim.js). The real StatBroadcast basketball page had not been seen when this was
+# written, so the layout is a guess that covers both likely box styles: the home box uses a short live
+# layout (made-attempted cells, ORB-DRB) with TEAM and Totals rows; the away box uses the classic StatCrew
+# columns (FG-FGA ... OFF DEF TOT PF TP A TO BLK S MIN). Each side also gets a by-period team table with
+# no # or Player column, which the reader must not mistake for players.
+sim = (ROOT / "src" / "bb-sim.js").read_text(encoding="utf-8")
+bb_page = f"""<!doctype html><html><head><meta charset="utf-8"><title>, - </title></head>
+<body style="font:12px Arial;background:#fff;color:#000">
+<h4>Ridgeline at Montana St.</h4>
+<div id="console" style="border:1px solid #999;padding:4px;margin:6px 0">Waiting</div>
+<table id="line" border="1"><tr><th></th><th>1</th><th>2</th><th>T</th></tr>
+<tr><td>RDG</td><td></td><td></td><td></td></tr><tr><td>MSU</td><td></td><td></td><td></td></tr></table>
+<h5>Ridgeline</h5><table id="t-away" border="1"></table><table id="s-away" border="1"></table>
+<h5>Montana St.</h5><table id="t-home" border="1"></table><table id="s-home" border="1"></table>
+<ol id="pbp" reversed></ol>
+<script>{sim}</script>
+<script>
+const g = BBSim.createGame({{}});
+const tr = (cells) => '<tr><td>' + cells.join('</td><td>') + '</td></tr>';
+const th = (cells) => '<thead><tr><th>' + cells.join('</th><th>') + '</th></tr></thead>';
+const m = (a, b) => a + '-' + b;
+// Short live layout.
+function liveTable(t) {{
+  const H = ['#', 'PLAYER', 'MIN', 'FG', '3PT', 'FT', 'ORB-DRB', 'REB', 'PF', 'A', 'TO', 'BLK', 'STL', 'PTS'];
+  const row = (p) => tr([p.uni, p.last + ', ' + p.first, p.min, m(p.fgm, p.fga), m(p.tpm, p.tpa), m(p.ftm, p.fta), m(p.oreb, p.dreb), p.reb, p.pf, p.ast, p.to, p.blk, p.stl, p.pts]);
+  const T = t.totals;
+  return th(H) + '<tbody>' + t.players.map(row).join('') + tr(['', 'TEAM', '', '', '', '', '0-0', 0, '', '', 0, '', '', '']) +
+    tr(['', 'Totals', '', m(T.fgm, T.fga), m(T.tpm, T.tpa), m(T.ftm, T.fta), m(T.oreb, T.dreb), T.reb, T.pf, T.ast, T.to, T.blk, T.stl, T.pts]) + '</tbody>';
+}}
+// Classic StatCrew layout.
+function crewTable(t) {{
+  const H = ['##', 'Player', 'FG-FGA', '3FG-FGA', 'FT-FTA', 'OFF', 'DEF', 'TOT', 'PF', 'TP', 'A', 'TO', 'BLK', 'S', 'MIN'];
+  const row = (p) => tr([p.uni, p.last.toUpperCase() + ',' + p.first.toUpperCase(), m(p.fgm, p.fga), m(p.tpm, p.tpa), m(p.ftm, p.fta), p.oreb, p.dreb, p.reb, p.pf, p.pts, p.ast, p.to, p.blk, p.stl, p.min]);
+  const T = t.totals;
+  return th(H) + '<tbody>' + t.players.map(row).join('') + tr(['', 'TEAM', '', '', '', 0, 0, 0, '', '', '', 0, '', '', '']) +
+    tr(['', 'Totals', m(T.fgm, T.fga), m(T.tpm, T.tpa), m(T.ftm, T.fta), T.oreb, T.dreb, T.reb, T.pf, T.pts, T.ast, T.to, T.blk, T.stl, '']) + '</tbody>';
+}}
+// Team stats by period: no # or Player column.
+function byPeriod(s, side) {{
+  const T = s.teams[side].totals;
+  const rows = [['1st Half', m(T.fgm, T.fga), m(T.tpm, T.tpa), m(T.ftm, T.fta), T.reb, T.ast, T.to, T.pts], ['Game', m(T.fgm, T.fga), m(T.tpm, T.tpa), m(T.ftm, T.fta), T.reb, T.ast, T.to, T.pts]];
+  return '<tr><th>Period</th><th>FG</th><th>3PT</th><th>FT</th><th>REB</th><th>A</th><th>TO</th><th>PTS</th></tr>' + rows.map(tr).join('');
+}}
+window.showStep = function (n) {{
+  const s = g.snapshot(n);
+  document.title = g.title(n);
+  const by = g.byPeriod(n), rows = document.querySelectorAll('#line tr');
+  for (let k = 1; k <= 2; k++) {{ rows[1].cells[k].textContent = by.away[k - 1] == null ? '' : by.away[k - 1]; rows[2].cells[k].textContent = by.home[k - 1] == null ? '' : by.home[k - 1]; }}
+  rows[1].cells[3].textContent = s.score.away; rows[2].cells[3].textContent = s.score.home;
+  document.getElementById('t-home').innerHTML = liveTable(s.teams.home);
+  document.getElementById('t-away').innerHTML = crewTable(s.teams.away);
+  document.getElementById('s-home').innerHTML = byPeriod(s, 'home');
+  document.getElementById('s-away').innerHTML = byPeriod(s, 'away');
+  const lines = g.linesAt(n);
+  if (lines.length) document.getElementById('console').textContent = lines[lines.length - 1];
+  for (const text of lines) {{ const li = document.createElement('li'); li.textContent = text; document.getElementById('pbp').prepend(li); }}
+  while (document.getElementById('pbp').children.length > 10) document.getElementById('pbp').lastElementChild.remove();
+}};
+window.showStep(0);
+</script></body></html>"""
+(ROOT / "test" / "mock-statbroadcast-bb.html").write_text(bb_page, encoding="utf-8", newline="\n")
+print("wrote test/mock-statbroadcast-bb.html")

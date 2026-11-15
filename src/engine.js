@@ -7,9 +7,15 @@
  *     score:{home,away}, setsWon:{home,away},
  *     teams:{ home:{code,name,players:[P], totals?:T}, away:{...} } }
  *   P = { uni, first, last, k, e, ta, a, sa, se, re, dig, bs, ba, be }
+ *
+ * Basketball (sport:'bb') has its own contract and rules in basketball.js. The engine picks the sport
+ * from snapshot.sport on every update and starts over when it changes.
  */
 (function (root) {
   'use strict';
+
+  // The basketball rules: already on the page in the browser bundle, required in Node.
+  const BB = root.PopBasketball || (typeof module !== 'undefined' && module.exports && typeof require === 'function' ? require('./basketball.js') : null);
 
   const SIDES = ['home', 'away'];
   const other = (s) => (s === 'home' ? 'away' : 'home');
@@ -38,7 +44,7 @@
   function swapSides(s, on) {
     if (!on || !s) return s;
     return { ...s, score: { home: s.score.away, away: s.score.home },
-      setsWon: { home: s.setsWon.away, away: s.setsWon.home },
+      setsWon: s.setsWon ? { home: s.setsWon.away, away: s.setsWon.home } : { home: 0, away: 0 },
       teams: { home: s.teams.away, away: s.teams.home } };
   }
 
@@ -227,6 +233,33 @@
   const ACTIVITY_MINS = { k: 4, dig: 5, a: 10, tb: 2, sa: 2 };
   const activityOf = (p) => Object.keys(ACTIVITY_MINS).reduce((a, f) => a + p[f] / ACTIVITY_MINS[f], 0);
 
+  // What the engine needs to know about a sport. Volleyball is defined here; basketball.js supplies the
+  // same shape (plus track, teamCards, alerts and header, which volleyball keeps inside create()).
+  const VB = {
+    id: 'vb', pops: VB_POPS, words: STAT_WORDS, derive: vbDerive, norms: vbNorms, eff: vbEffSets, activity: activityOf,
+    fields: ['k', 'e', 'ta', 'a', 'sa', 'se', 're', 'dig', 'bs', 'ba', 'be'],
+    leadFields: ['k', 'dig', 'a', 'tb', 'sa'],
+    highMins: { k: 5, dig: 6, a: 12, tb: 3, sa: 2 }, highWord: 'Match-high',
+    singleMins: { k: 4, dig: 5, a: 10, tb: 2, sa: 1, pts: 8 },
+    singleOk: (x, p) => x.id !== 'atk' && (x.id !== 'pts' || [p.k, p.sa, p.tb].filter((v) => v > 0).length >= 2),
+    badges(p) {
+      const out = [];
+      if (p.k >= 8 && p.e === 0) out.push('0 errors');
+      if (['k', 'dig', 'a'].filter((f) => p[f] >= 10).length >= 2) out.push('Double-double');
+      return out;
+    },
+    act: (a) => ({ stat: ACT_STAT[a], label: ACT_LABEL[a], w: a === 'dig' ? 0.5 : 1 }),
+    cfg: { passRallies: 10, dwellRallies: 4, pinWindow: 1, recentWindow: 12 },
+    pinWorthy: () => true,
+    pinWhen: (d) => (d === 0 ? 'Just now · ' : 'Last rally · '),
+    listStats: (p) => ({ k: p.k, e: p.e, ta: p.ta, pct: fmtPct(p.pct), a: p.a, sa: p.sa, se: p.se, dig: p.dig,
+      bs: p.bs, ba: p.ba, tb: fmtHalf(p.tb), pts: fmtHalf(p.pts) }),
+    passText: 'Skip this player for the next 10 rallies',
+    unit: ['rally', 'rallies'],
+  };
+  const BBS = BB ? { ...BB, pops: BB.POPS, words: BB.WORDS, fields: BB.FIELDS,
+    act: (a) => BB.ACTS[a] || { stat: null, label: '', w: 1 } } : null;
+
   function create(opts) {
     opts = opts || {};
     const clock = opts.now || (() => Date.now());
@@ -234,8 +267,12 @@
     // dwellRallies: a card that just arrived gets a stickiness bonus for this many rallies, so cards don't flicker.
     // maxCards: player cards per side (3 or 5; the full-list layout highlights maxCards rows).
     // Team card: one per side with minTeamLines..maxTeamLines stat lines, notable ones first.
+    let SP = VB;
     const cfg = { pops: VB_POPS, maxCards: 3, maxPops: 3, minPops: 2, minTeamLines: 3, maxTeamLines: 5, passRallies: 10,
       holdMs: 10 * 60 * 1000, dwellRallies: 4 };
+    function setSport(sp) {
+      SP = sp; cfg.pops = sp.pops; cfg.passRallies = sp.cfg.passRallies; cfg.dwellRallies = sp.cfg.dwellRallies;
+    }
     // held: cards William pinned with the Pin button, key -> { since, until } in clock ms.
     // restore: a player whose Pass was just undone; they come straight back on the next compute.
     const user = { hidden: new Set(), passed: {}, stars: { home: [], away: [] }, held: {}, restore: null };
@@ -252,11 +289,14 @@
         statAt: {}, prevStats: {}, rotateDue: { home: false, away: false },
         consoleAlert: null, setWon: null,
         prevTotals: null, setStart: null, finishedSet: null,
+        bb: BB ? BB.freshMem() : null,
       };
       user.passed = {};
       last = null;
     }
     reset();
+    // What basketball.js works with: the live memory (reset() replaces the object, hence the getter).
+    const ctx = { get mem() { return mem; }, cfg };
 
     // Summary rows that a page reader might still pass as players (team, totals, "Set 1", "Match"). The reader
     // rejects them too (v0.3.5); this is the second line of defence so they never reach a card or a total.
@@ -268,11 +308,10 @@
       return { ...s, teams: t };
     }
 
-    const STAT_FIELDS = ['k', 'e', 'ta', 'a', 'sa', 'se', 're', 'dig', 'bs', 'ba', 'be'];
     function trackStats(s) {
       for (const side of SIDES) for (const p of s.teams[side].players) {
         const key = playerKey(side, p.uni);
-        const h = STAT_FIELDS.map((f) => num(p[f])).join(',');
+        const h = SP.fields.map((f) => num(p[f])).join(',');
         if (mem.prevStats[key] !== h) { mem.prevStats[key] = h; mem.statAt[key] = mem.rally; }
       }
     }
@@ -356,23 +395,24 @@
     function ingest(lines, snapshot, index, pointSide) {
       let pointPlay = null;
       for (const text of lines) {
-        const play = parsePlay(text, snapshot, index);
+        const play = SP === VB ? parsePlay(text, snapshot, index) : BB.parsePlay(text, snapshot, index, { namesIn, teamIn });
         play.rally = mem.rally;
         play.score = mem.lastScore ? { home: mem.lastScore.home, away: mem.lastScore.away } : null;
         mem.plays.push(play);
         if (play.alert) mem.consoleAlert = { ...play.alert, text: text, rally: mem.rally };
         if (play.positive && play.actor) {
           const a = play.actor;
-          mem.pins[a.side] = { key: playerKey(a.side, a.uni), stat: ACT_STAT[play.act], label: ACT_LABEL[play.act], rally: mem.rally };
-          mem.involvement.push({ rally: mem.rally, key: playerKey(a.side, a.uni), w: play.act === 'dig' ? 0.5 : 1 });
-          for (const b of play.blockers.slice(1)) mem.involvement.push({ rally: mem.rally, key: playerKey(b.side, b.uni), w: 1 });
+          const meta = SP.act(play.act);
+          mem.pins[a.side] = { key: playerKey(a.side, a.uni), stat: meta.stat, label: meta.label, rally: mem.rally };
+          mem.involvement.push({ rally: mem.rally, key: playerKey(a.side, a.uni), w: meta.w });
+          for (const b of (play.extras || play.blockers.slice(1))) mem.involvement.push({ rally: mem.rally, key: playerKey(b.side, b.uni), w: 1 });
         }
         if (play.server || play.act) pointPlay = play;
       }
       if (mem.plays.length > 60) mem.plays.splice(0, mem.plays.length - 60);
       // Involvement only counts for 12 rallies; drop older entries so the list never grows for a whole match.
-      if (mem.involvement.length > 80) mem.involvement = mem.involvement.filter((x) => mem.rally - x.rally <= 12);
-      trackServe(pointPlay, pointSide);
+      if (mem.involvement.length > 80) mem.involvement = mem.involvement.filter((x) => mem.rally - x.rally <= SP.cfg.recentWindow);
+      if (SP === VB) trackServe(pointPlay, pointSide);
     }
 
     // ---- runs
@@ -403,7 +443,7 @@
       return vbDerive(sum);
     }
 
-    function teamCards(s, side, e) {
+    function vbTeamLines(s, side, e) {
       const T = teamTotals(s.teams[side]);
       const O = teamTotals(s.teams[other(side)]);
       const oc = s.teams[other(side)].code;
@@ -465,6 +505,11 @@
         c.push({ id: 'kills', dim: true, score: 0.05, big: pl(T.k, 'Kill'), sub: `${oc} ${O.k}` });
         c.push({ id: 'blk', dim: true, score: 0.04, big: pl(fmtHalf(T.tb), 'Block'), sub: `${oc} ${fmtHalf(O.tb)}` });
       }
+      return c;
+    }
+
+    function teamCards(s, side, e) {
+      const c = SP === VB ? vbTeamLines(s, side, e) : BB.teamCards(ctx, s, side, e);
       const prev = mem.prevTeam[side];
       for (const x of c) if (prev.includes(x.id)) x.score += 0.2;
       c.sort((a, b) => b.score - a.score);
@@ -478,7 +523,7 @@
     // ---- player cards
     function scorePlayer(p, side, e, highs, s, sv) {
       const key = playerKey(side, p.uni);
-      const N = vbNorms(p, e);
+      const N = SP.norms(p, e, s);
       let pops = cfg.pops.map((d) => {
         let sc = d.score(p, N);
         if (sc > 0 && highs[d.uses[0]] && highs[d.uses[0]].has(key)) sc += 0.25;
@@ -487,18 +532,23 @@
       const seen = new Set();
       pops = pops.filter((x) => (x.group ? (seen.has(x.group) ? false : seen.add(x.group)) : true));
 
-      const badges = [];
-      if (p.k >= 8 && p.e === 0) badges.push('0 errors');
-      const dd = ['k', 'dig', 'a'].filter((f) => p[f] >= 10);
-      if (dd.length >= 2) badges.push('Double-double');
-      for (const f of ['k', 'dig', 'a', 'tb', 'sa']) if (highs[f] && highs[f].has(key)) badges.push('Match-high ' + STAT_WORDS[f]);
+      const badges = SP.badges(p, N);
+      for (const f of SP.leadFields) if (highs[f] && highs[f].has(key)) badges.push(SP.highWord + ' ' + SP.words[f]);
 
       const starred = (user.stars[side] || []).some((st) => matchesStar(p, st));
       const pin = mem.pins[side];
-      const pinned = !!(pin && pin.key === key && mem.rally - pin.rally <= 1);
+      const pinned = !!(pin && pin.key === key && mem.rally - pin.rally <= SP.cfg.pinWindow && SP.pinWorthy(p, N, pin));
       const hold = user.held[key] && user.held[key].until > clock() ? user.held[key] : null;
-      const serving = sv.side === side && sv.uni === p.uni && sv.streak >= 3;
-      const recent = mem.involvement.filter((x) => x.key === key && mem.rally - x.rally <= 12).reduce((a, x) => a + x.w, 0);
+      // A streak keeps a card live: a server on a run of points, or (basketball) one player scoring all of a team's points.
+      let streak = null;
+      if (SP === VB) {
+        if (sv.side === side && sv.uni === p.uni && sv.streak >= 3) streak = { text: `On serve · ${sv.streak} straight`, stat: p.sa > 0 ? 'sa' : null };
+      } else {
+        const hot = BB.hotOf(ctx, side);
+        if (hot && hot.key === key) streak = { text: `${hot.n} straight ${s.teams[side].code} points`, stat: 'pts' };
+      }
+      const serving = !!streak;
+      const recent = mem.involvement.filter((x) => x.key === key && mem.rally - x.rally <= SP.cfg.recentWindow).reduce((a, x) => a + x.w, 0);
       const best = pops[0] ? pops[0].score : 0;
       const second = pops[1] ? pops[1].score : 0;
       let impact = best + 0.35 * second + 0.2 * Math.min(4, recent);
@@ -506,8 +556,8 @@
       if (serving) impact += 1.2;
       if (starred) impact += 0.35;
       if (pinned) impact += 100;
-      return { key, side, p, N, pops, badges, pinned, pin: pinned ? pin : null, serving, starred, impact, hold,
-        activity: activityOf(p) + 0.2 * Math.min(4, recent), eligible: pinned || serving || best >= 0.85 };
+      return { key, side, p, N, pops, badges, pinned, pin: pinned ? pin : null, serving, streak, starred, impact, hold,
+        activity: SP.activity(p) + 0.2 * Math.min(4, recent), eligible: pinned || serving || best >= 0.85 };
     }
 
     function cardFor(c, sv, teamLeads) {
@@ -518,7 +568,7 @@
         if (x.score < 0.8 || pops.length >= cfg.maxPops) continue;
         if (!covered(x, pops)) pops.push(x);
       }
-      const force = c.pin ? c.pin.stat : (c.serving && p.sa > 0 ? 'sa' : null);
+      const force = c.pin ? c.pin.stat : (c.streak ? c.streak.stat : null);
       const raw = () => cfg.pops.map((d) => ({ id: d.id, name: d.name, uses: d.uses, score: d.score(p, c.N), parts: d.parts(p) }));
       const simplest = (a, b) => b.score - a.score || a.uses.length - b.uses.length || a.parts.length - b.parts.length;
       if (force && !pops.some((x) => x.uses.includes(force))) {
@@ -528,9 +578,8 @@
       if (pops.length < cfg.minPops) {
         // Fewer notable options than the card should offer: add the player's strongest raw lines
         // (single stats the player actually has), shown greyed until they reach pop level.
-        const MINS = { k: 4, dig: 5, a: 10, tb: 2, sa: 1, pts: 8 };
-        const singles = raw().filter((x) => x.uses.length === 1 && x.id !== 'atk' && MINS[x.uses[0]] && p[x.uses[0]] > 0
-            && (x.id !== 'pts' || [p.k, p.sa, p.tb].filter((v) => v > 0).length >= 2))
+        const MINS = SP.singleMins;
+        const singles = raw().filter((x) => x.uses.length === 1 && MINS[x.uses[0]] && p[x.uses[0]] > 0 && SP.singleOk(x, p))
           .sort((a, b) => p[b.uses[0]] / MINS[b.uses[0]] - p[a.uses[0]] / MINS[a.uses[0]]);
         for (const x of singles) {
           if (pops.length >= cfg.minPops) break;
@@ -542,14 +591,14 @@
         return { id: x.id, name: x.name, parts: x.parts, score: x.score, best: i === 0, live, dim: !live && x.score < 0.8 };
       });
       let tag = null;
-      if (c.pin) tag = { kind: 'live', text: (mem.rally - c.pin.rally === 0 ? 'Just now · ' : 'Last rally · ') + c.pin.label };
-      else if (c.serving) tag = { kind: 'serve', text: `On serve · ${sv.streak} straight` };
+      if (c.pin) tag = { kind: 'live', text: SP.pinWhen(mem.rally - c.pin.rally) + c.pin.label };
+      else if (c.serving) tag = { kind: 'serve', text: c.streak.text };
       let reason = c.badges.slice(0, 2).join(' · ');
       if (!reason) {
-        const lead = ['k', 'dig', 'a', 'tb', 'sa'].find((f) => teamLeads[f] === c.key);
-        if (lead) reason = 'Team leader · ' + STAT_WORDS[lead];
+        const lead = SP.leadFields.find((f) => teamLeads[f] === c.key);
+        if (lead) reason = 'Team leader · ' + SP.words[lead];
       }
-      if (c.serving && c.pin) reason = [`On serve · ${sv.streak} straight`, reason].filter(Boolean).join(' · ');
+      if (c.serving && c.pin) reason = [c.streak.text, reason].filter(Boolean).join(' · ');
       return { key: c.key, side: c.side, uni: p.uni, first: p.first, last: p.last, tag, reason, pops,
         starred: !!c.starred, impact: Math.round(c.impact * 100) / 100,
         held: c.hold ? { until: c.hold.until } : null,
@@ -559,9 +608,9 @@
 
     function playerCards(s, side, e, highs) {
       const sv = mem.serve;
-      const players = s.teams[side].players.map(vbDerive);
+      const players = s.teams[side].players.map(SP.derive);
       const teamLeads = {};
-      for (const f of ['k', 'dig', 'a', 'tb', 'sa']) {
+      for (const f of SP.leadFields) {
         const top = players.slice().sort((a, b) => b[f] - a[f])[0];
         if (top && top[f] > 0) teamLeads[f] = playerKey(side, top.uni);
       }
@@ -646,18 +695,14 @@
         const ia = order.has(a.key) ? order.get(a.key) : 1e9, ib = order.has(b.key) ? order.get(b.key) : 1e9;
         return ia - ib || rank(b) - rank(a) || (parseInt(a.p.uni, 10) || 0) - (parseInt(b.p.uni, 10) || 0);
       }).map((c) => ({ key: c.key, uni: c.p.uni, first: c.p.first, last: c.p.last, top: order.has(c.key), starred: !!c.starred,
-        held: !!c.hold, live: !!c.pinned, stats: listStats(c.p) }));
+        held: !!c.hold, live: !!c.pinned, stats: SP.listStats(c.p) }));
       return { cards, list };
     }
 
-    // The two-stat view in the list layout picks from these, by field name.
-    const listStats = (p) => ({ k: p.k, e: p.e, ta: p.ta, pct: fmtPct(p.pct), a: p.a, sa: p.sa, se: p.se, dig: p.dig,
-      bs: p.bs, ba: p.ba, tb: fmtHalf(p.tb), pts: fmtHalf(p.pts) });
-
     function matchHighs(s) {
       const all = [];
-      for (const side of SIDES) for (const p of s.teams[side].players) all.push({ side, p: vbDerive(p) });
-      const mins = { k: 5, dig: 6, a: 12, tb: 3, sa: 2 };
+      for (const side of SIDES) for (const p of s.teams[side].players) all.push({ side, p: SP.derive(p) });
+      const mins = SP.highMins;
       const highs = {};
       for (const f in mins) {
         const max = Math.max(0, ...all.map((x) => x.p[f]));
@@ -668,6 +713,7 @@
 
     // ---- alerts
     function alerts(s) {
+      if (SP !== VB) return BB.alerts(ctx, s);
       const out = [];
       if (s.status === 'final') {
         const w = num(s.setsWon.home) > num(s.setsWon.away) ? 'home' : 'away';
@@ -724,13 +770,15 @@
 
     function compute() {
       const s = last;
-      const e = vbEffSets(s);
+      const e = SP.eff(s);
       const highs = matchHighs(s);
-      const sv = mem.serve;
+      const vb = SP === VB;
+      const sv = vb ? mem.serve : freshServe();
       const serverP = sv.uni && sv.side ? s.teams[sv.side].players.find((x) => String(x.uni) === String(sv.uni)) : null;
-      const rot = rotation(s);
+      const rot = vb ? rotation(s) : null;
       const predicted = sv.side && !serverP ? rot[sv.side].predictedServer : null;
       const view = {
+        sport: SP.id, unit: SP.unit, passText: SP.passText,
         teams: { home: { code: s.teams.home.code, name: s.teams.home.name }, away: { code: s.teams.away.code, name: s.teams.away.name } },
         set: num(s.set), score: { home: num(s.score.home), away: num(s.score.away) },
         setsWon: { home: num(s.setsWon.home), away: num(s.setsWon.away) }, status: s.status,
@@ -755,12 +803,14 @@
         }),
         effSets: Math.round(e * 100) / 100,
       };
+      if (!vb) Object.assign(view, BB.header(ctx, s));
       for (const side of SIDES) {
         view.teamCards[side] = teamCards(s, side, e);
         const pc = playerCards(s, side, e, highs);
         view.playerCards[side] = pc.cards;
         view.players[side] = pc.list;
       }
+      if (!vb) mem.bb.view = view;
       return view;
     }
 
@@ -768,7 +818,23 @@
       reset,
       update(snapshot, lines) {
         snapshot = cleanSnapshot(snapshot);
+        const sp = snapshot.sport === 'bb' && BBS ? BBS : VB;
+        if (sp !== SP) { setSport(sp); reset(); }
         const index = buildNameIndex(snapshot);
+        if (SP !== VB) {
+          snapshot = { ...snapshot, set: num(snapshot.period), setsWon: { home: 0, away: 0 } };
+          const changed = BB.track(ctx, snapshot);
+          // Only the game clock moved: keep every card exactly where it is and refresh the header.
+          if (!changed && !(lines && lines.length) && mem.bb.view && last) {
+            last = snapshot;
+            mem.bb.view = { ...mem.bb.view, ...BB.header(ctx, snapshot), alerts: BB.alerts(ctx, snapshot) };
+            return mem.bb.view;
+          }
+          ingest(lines || [], snapshot, index, null);
+          trackStats(snapshot);
+          last = snapshot;
+          return compute();
+        }
         const totals = { home: teamTotals(snapshot.teams.home), away: teamTotals(snapshot.teams.away) };
         if (!mem.setStart && num(snapshot.score.home) + num(snapshot.score.away) === 0) mem.setStart = totals;
         const pointSide = trackScore(snapshot, totals);
@@ -780,6 +846,7 @@
         return compute();
       },
       view() { return last ? compute() : null; },
+      get sport() { return SP.id; },
       // Layout: how many player cards each side shows (3 or 5). The list layout highlights that many rows.
       setCards(n) { cfg.maxCards = n === 5 ? 5 : 3; },
       // Auto-rotate: the next compute swaps the non-pinned cards for the best players not yet on the board.
@@ -814,7 +881,7 @@
     };
   }
 
-  const api = { create, parsePlay, buildNameIndex, fmtPct, vbDerive, VB_POPS, swapSides, matchesStar, normName };
+  const api = { create, parsePlay, buildNameIndex, fmtPct, vbDerive, VB_POPS, swapSides, matchesStar, normName, basketball: BB };
   root.PopEngine = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

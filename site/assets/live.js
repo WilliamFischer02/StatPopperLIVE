@@ -10,11 +10,17 @@
   };
   const stars = IP.createStarStore('spb:stars:');
   const MSU_ROSTER = SPB.rosters.msuVolleyball;
+  // Stars are kept per team and per sport: MSU volleyball picks stay out of MSU basketball.
+  const starKey = (t, snap) => IP.teamKey(t) + (snap && snap.sport === 'bb' ? ':BB' : '');
+  // The bundled roster is volleyball's, so it only fills in on a volleyball page.
+  const bundled = (t, snap) => (snap && snap.sport !== 'bb' && IP.isMSU(t) ? MSU_ROSTER : []);
+  const isPractice = (id) => /^practice/.test(String(id || ''));
+  const SPORT_NAME = { vb: 'Volleyball', bb: 'Basketball' };
   const okOrigin = (o) => {
     try { const u = new URL(o); return u.origin === location.origin || (u.protocol === 'https:' && /(^|\.)statbroadcast\.com$/.test(u.hostname)); } catch (e) { return false; }
   };
 
-  let eng = PE.create(), eventId = null, inst = null, lastLineId = 0, lastHash = '', view = null;
+  let eng = PE.create(), eventId = null, inst = null, lastLineId = 0, lastHash = '', lastClock, view = null;
   let last = null, lastAt = 0, lastChangeAt = 0, msgs = 0, lastGood = null;
   let statsWin = null, openedEvent = null, swapped = !!store.get('swap', false);
   let pickerOpen = false, checkOpen = false, startForced = false;
@@ -32,7 +38,7 @@
       const [side, uni] = k.split(':');
       const snap = oriented();
       const p = snap && snap.teams[side].players.find((x) => String(x.uni) === uni);
-      if (p) { stars.toggle(IP.teamKey(snap.teams[side]), p); applyStars(); rerender(); }
+      if (p) { stars.toggle(starKey(snap.teams[side], snap), p); applyStars(); rerender(); }
     },
   });
   const oriented = () => (lastGood ? PE.swapSides(lastGood, swapped) : null);
@@ -46,6 +52,7 @@
   });
   const settings = ctl.settings;
   function applyLayout() {
+    if (lastGood) ctl.setSport(lastGood.sport);
     eng.setCards(settings.layout === '5' ? 5 : 3);
     board.setLayout(settings.layout === 'all' ? 'list' : 'cards', settings.listStats);
   }
@@ -53,7 +60,7 @@
   function applyStars() {
     const s = oriented();
     if (!s) return;
-    eng.setStars({ home: stars.get(IP.teamKey(s.teams.home)), away: stars.get(IP.teamKey(s.teams.away)) });
+    eng.setStars({ home: stars.get(starKey(s.teams.home, s)), away: stars.get(starKey(s.teams.away, s)) });
   }
   // Team colours, remembered per team (not per side) so they survive Swap sides and the next match,
   // and shared with the stats tab's in-tab board through the ack and state messages.
@@ -97,13 +104,18 @@
     const s = oriented();
     const col = (side) => {
       const t = s.teams[side];
-      const tk = IP.teamKey(t);
-      const players = IP.mergeRoster(t.players, IP.isMSU(t) ? MSU_ROSTER : []);
+      const tk = starKey(t, s);
+      const players = IP.mergeRoster(t.players, bundled(t, s));
       return { side, title: t.name || t.code, teamKey: tk, players, starred: (p) => stars.has(tk, p) };
     };
     let cols;
     if (s) cols = [col('home'), col('away')];
-    else {
+    else if (store.get('sport', 'vb') === 'bb') {
+      // Last game was basketball: no roster is bundled for it, so both columns wait for the stats page.
+      const note = 'The roster appears once the stats page lists it.';
+      cols = [{ side: 'home', title: 'Montana St.', teamKey: 'MSU:BB', players: [], starred: () => false, note },
+        { side: 'away', title: 'Opponent', teamKey: '?', players: [], starred: () => false, note }];
+    } else {
       cols = [
         { side: 'home', title: 'Montana St.', teamKey: 'MSU', players: IP.mergeRoster([], MSU_ROSTER), starred: (p) => stars.has('MSU', p) },
         { side: 'away', title: 'Opponent', teamKey: '?', players: [], starred: () => false, note: 'The opponent’s roster appears once the stats page lists it, usually shortly before first serve.' },
@@ -144,19 +156,26 @@
     }
     if (d.ok && d.snap) {
       const firstGood = !lastGood;
+      const newSport = !lastGood || lastGood.sport !== d.snap.sport;
       lastGood = d.snap;
+      if (newSport) { store.set('sport', d.snap.sport === 'bb' ? 'bb' : 'vb'); applyLayout(); lastHash = ''; }
       const lines = (d.lines || []).filter((l) => l.id > lastLineId);
       if (d.lines && d.lines.length) lastLineId = Math.max(lastLineId, ...d.lines.map((l) => l.id));
-      const h = JSON.stringify(d.snap);
+      // The basketball clock runs every second; it is left out of the hash so it never counts as a stat change.
+      const h = JSON.stringify({ ...d.snap, clock: null });
       if (h !== lastHash || lines.length) {
         lastHash = h; lastChangeAt = Date.now();
         applyStars();
-        view = eng.update(PE.swapSides(d.snap, swapped), lines.map((l) => l.text).slice(-3));
+        view = eng.update(PE.swapSides(d.snap, swapped), lines.map((l) => l.text).slice(d.snap.sport === 'bb' ? -6 : -3));
         applyColors();
         board.render(view);
-        if (firstGood) { remember(d); renderPicker(); }
+        if (firstGood || newSport) { if (firstGood) remember(d); renderPicker(); }
         else if (pickerOpen) renderPicker();
+      } else if (d.snap.clock !== lastClock && view) {
+        view = eng.update(PE.swapSides(d.snap, swapped), []);
+        board.renderGame(view);
       }
+      lastClock = d.snap.clock;
     }
     paint();
   }
@@ -167,14 +186,15 @@
     v = String(v || '').trim();
     if (!v) return null;
     if (/^\d{4,8}$/.test(v)) return 'https://stats.statbroadcast.com/broadcast/?id=' + v;
-    if (/^practice(\?\S*)?$/i.test(v)) return location.origin + '/' + v;
+    if (/^practice(-bb)?(\?\S*)?$/i.test(v)) return location.origin + '/' + v;
     try {
       const u = new URL(/^https?:\/\//i.test(v) ? v : 'https://' + v);
       if (/(^|\.)statbroadcast\.com$/.test(u.hostname) || u.origin === location.origin) { u.protocol = 'https:'; return u.href; }
     } catch (e) { /* not a URL */ }
     return null;
   }
-  const eventOf = (href) => { try { return new URL(href).searchParams.get('id') || (/practice/.test(href) ? 'practice' : null); } catch (e) { return null; } };
+  const eventOf = (href) => { try { return new URL(href).searchParams.get('id') || (/practice-bb/.test(href) ? 'practice-bb' : /practice/.test(href) ? 'practice' : null); } catch (e) { return null; } };
+  const practiceLabel = (id) => (id === 'practice-bb' ? 'Basketball practice' : 'Practice page');
 
   function openStats(href) {
     statsWin = window.open(href, 'spb-stats');
@@ -184,7 +204,7 @@
     $('feedhint').textContent = 'Stats page opened. Accept & Continue there, then start the reader if it isn’t automatic.';
     $('feedhint').className = 'hint';
     const rec = store.get('recent', []).filter((r) => r.href !== href);
-    rec.unshift({ href, label: rec.find((r) => r.href === href)?.label || (openedEvent === 'practice' ? 'Practice page' : 'Event ' + openedEvent) });
+    rec.unshift({ href, label: rec.find((r) => r.href === href)?.label || (isPractice(openedEvent) ? practiceLabel(openedEvent) : 'Event ' + openedEvent) });
     store.set('recent', rec.slice(0, 5));
     renderRecent();
     paint();
@@ -196,6 +216,7 @@
     openStats(href);
   });
   $('practice').addEventListener('click', () => openStats(location.origin + '/practice'));
+  $('practicebb').addEventListener('click', () => openStats(location.origin + '/practice-bb'));
 
   function remember(d) {
     const s = d.snap;
@@ -203,7 +224,7 @@
     const href = d.diag && d.diag.url;
     if (!href) return;
     const rec = store.get('recent', []).filter((r) => r.href !== href);
-    rec.unshift({ href, label: d.eventId === 'practice' ? 'Practice page' : label });
+    rec.unshift({ href, label: isPractice(d.eventId) ? practiceLabel(d.eventId) : label });
     store.set('recent', rec.slice(0, 5));
     renderRecent();
   }
@@ -248,8 +269,8 @@
       mode = '◐ Linked'; cls = 'link'; conn = 'Linked · ' + (last.error || 'waiting for stats');
     } else {
       const s = last.snap, paused = !!(last.diag && last.diag.paused);
-      mode = paused ? '‖ Paused' : '● Live'; cls = paused ? 'wait' : 'live'; live = !paused && s.status === 'live';
-      conn = `${s.teams.away.code} at ${s.teams.home.code} · ${last.eventId === 'practice' ? 'practice page' : 'event ' + last.eventId} · updated ${secs(now - lastChangeAt)} s ago${paused ? ' · paused' : ''}`;
+      mode = paused ? '‖ Paused' : '● Live'; cls = paused ? 'wait' : 'live'; live = !paused && s.status === 'live' && !s.intermission;
+      conn = `${SPORT_NAME[s.sport] || 'Volleyball'} · ${s.teams.away.code} at ${s.teams.home.code} · ${isPractice(last.eventId) ? 'practice page' : 'event ' + last.eventId} · updated ${secs(now - lastChangeAt)} s ago${paused ? ' · paused' : ''}`;
     }
     // Freshness tint on the score: amber after 90 s without a stat change in a live set, red after 4 min.
     const quiet = now - lastChangeAt;
@@ -299,12 +320,18 @@
     const tables = (d.tables || []).map((t) => `${t.side === 'home' ? 'Home' : 'Visitor'}: ${t.players} players${t.totals ? ' + totals row' : ''}`).join(' · ') || '<span class="bad">none found</span>';
     const ign = (d.ignoredTables || []).length;
     const tablesNote = ign ? ` · ${ign} team or by-set ${ign === 1 ? 'table' : 'tables'} skipped` : '';
-    const score = s ? `${s.teams.home.code} ${s.score.home} – ${s.score.away} ${s.teams.away.code} · ${s.status === 'final' ? 'Final' : 'Set ' + s.set} · sets ${s.setsWon.home}–${s.setsWon.away}` : '<span class="bad">not read</span>';
+    const bb = !!s && s.sport === 'bb';
+    const when = !s ? '' : s.status === 'final' ? 'Final' : bb
+      ? `${s.period ? 'period ' + s.period : 'period not read'}${s.periods ? ' of ' + s.periods : ''}${s.intermission ? ' (break)' : ''} · clock ${s.clock || 'not read'}`
+      : `Set ${s.set} · sets ${s.setsWon.home}–${s.setsWon.away}`;
+    const score = s ? `${esc(s.teams.home.code)} ${s.score.home} – ${s.score.away} ${esc(s.teams.away.code)} · ${esc(when)}` : '<span class="bad">not read</span>';
+    const sport = d.sport ? SPORT_NAME[d.sport] : '<span class="bad">no volleyball or basketball box score found yet</span>';
     const lines = (last.lines || []).slice(-3).reverse().map((l) => `<div><code>${esc(l.text)}</code></div>`).join('') || '<span class="bad">none yet (they appear as plays happen)</span>';
     $('check').innerHTML = `<h3>Reader check</h3>
       <p class="note">Compare these with the stats page. If they match, the board is reading it correctly.</p>
       <dl class="kv">
         <dt>Status</dt><dd>${last.ok ? (d.paused ? '<span class="bad">StatBroadcast paused (its tab title starts with [Paused])</span>' : '<span class="ok">Reading OK</span>') : '<span class="bad">' + esc(last.error || 'Waiting') + '</span>'}</dd>
+        <dt>Sport</dt><dd>${sport}</dd>
         <dt>Tab title</dt><dd><code>${esc(d.title || '')}</code></dd>
         <dt>Score read</dt><dd>${score}</dd>
         <dt>Tables found</dt><dd>${tables}${tablesNote}</dd>
